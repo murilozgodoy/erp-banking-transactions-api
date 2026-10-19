@@ -12,3 +12,6 @@ spring:
 credit-score:
   base-url: http://credit-score.test
   timeout-ms: 1000
+auth0:
+  domain: test.auth0.com
+  audience: https://erp-banking-api

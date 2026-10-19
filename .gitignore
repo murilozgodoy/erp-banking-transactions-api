@@ -7,4 +7,5 @@ target/
 .project
 .settings/
 *.log
+.env
 .DS_Store

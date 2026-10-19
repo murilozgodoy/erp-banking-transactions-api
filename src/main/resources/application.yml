@@ -1,6 +1,12 @@
 server:
   port: ${SERVER_PORT:8080}
 
+auth0:
+  domain: ${AUTH0_DOMAIN:}
+  audience: ${AUTH0_AUDIENCE:}
+cors:
+  origins: ${CORS_ORIGINS:http://localhost:5173}
+
 spring:
   application:
     name: transactions-api
