@@ -10,6 +10,9 @@ cors:
 spring:
   application:
     name: transactions-api
+  # Em dev, lê as variáveis do .env da raiz do projeto (opcional; em produção vêm do ambiente).
+  config:
+    import: optional:file:.env[.properties]
   datasource:
     url: ${DATABASE_URL:jdbc:h2:mem:transactions;DB_CLOSE_DELAY=-1;MODE=PostgreSQL}
     username: ${DATABASE_USER:sa}
@@ -24,7 +27,7 @@ spring:
       enabled: false
 
 credit-score:
-  base-url: ${CREDIT_SCORE_API_URL:http://localhost:8002}
+  base-url: ${CREDIT_SCORE_API_URL:http://localhost:8082}
   timeout-ms: 5000
 
 management:
