@@ -18,6 +18,7 @@ import org.springframework.web.client.RestTemplate;
 
 import com.erpbanking.transactions.config.CreditScoreProperties;
 import com.erpbanking.transactions.dto.ScoreResponse;
+import com.erpbanking.transactions.exception.ApiExceptions.ScoreForbiddenException;
 import com.erpbanking.transactions.exception.ApiExceptions.ScoreUnavailableException;
 
 class CreditScoreClientTest {
@@ -72,5 +73,15 @@ class CreditScoreClientTest {
 
         assertThatThrownBy(() -> client.getLatestScore(1L))
                 .isInstanceOf(ScoreUnavailableException.class);
+    }
+
+    @Test
+    void throwsForbiddenWhen403() {
+        server.expect(requestTo("http://score.test/scores/customers/1/latest"))
+                .andRespond(withStatus(HttpStatus.FORBIDDEN));
+
+        assertThatThrownBy(() -> client.getLatestScore(1L))
+                .isInstanceOf(ScoreForbiddenException.class)
+                .hasMessageContaining("read:scores");
     }
 }

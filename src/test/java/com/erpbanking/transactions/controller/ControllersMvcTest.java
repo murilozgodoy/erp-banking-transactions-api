@@ -27,6 +27,7 @@ import org.springframework.test.web.servlet.MockMvc;
 
 import com.erpbanking.transactions.config.SecurityConfig;
 import com.erpbanking.transactions.dto.ScoreResponse;
+import com.erpbanking.transactions.exception.ApiExceptions.ScoreForbiddenException;
 import com.erpbanking.transactions.service.client.CreditScoreClient;
 
 @SpringBootTest
@@ -153,6 +154,18 @@ class ControllersMvcTest {
                 .andExpect(status().isCreated())
                 .andExpect(jsonPath("$.status").value("NEGADO"))
                 .andExpect(jsonPath("$.motivo", containsString("sem score")));
+    }
+
+    @Test
+    void solicitarCreditoSemPermissaoNoScoreReturns403() throws Exception {
+        when(creditScoreClient.getLatestScore(any()))
+                .thenThrow(new ScoreForbiddenException("Sem permissão para consultar o score (read:scores)"));
+
+        mockMvc.perform(post("/credits")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"customerId\":12,\"valor\":1000.00,\"prazoMeses\":6}"))
+                .andExpect(status().isForbidden())
+                .andExpect(jsonPath("$.error", containsString("read:scores")));
     }
 
     @Test

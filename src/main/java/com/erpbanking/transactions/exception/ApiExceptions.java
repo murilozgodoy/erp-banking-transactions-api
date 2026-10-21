@@ -23,4 +23,8 @@ public final class ApiExceptions {
     public static class ScoreUnavailableException extends RuntimeException {
         public ScoreUnavailableException(String msg) { super(msg); }
     }
+
+    public static class ScoreForbiddenException extends RuntimeException {
+        public ScoreForbiddenException(String msg) { super(msg); }
+    }
 }
