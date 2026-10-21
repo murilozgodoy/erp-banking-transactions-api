@@ -10,6 +10,7 @@ import org.springframework.web.client.RestTemplate;
 
 import com.erpbanking.transactions.config.CreditScoreProperties;
 import com.erpbanking.transactions.dto.ScoreResponse;
+import com.erpbanking.transactions.exception.ApiExceptions.ScoreForbiddenException;
 import com.erpbanking.transactions.exception.ApiExceptions.ScoreUnavailableException;
 
 @Component
@@ -31,6 +32,9 @@ public class CreditScoreClient {
         } catch (HttpClientErrorException e) {
             if (e.getStatusCode().equals(HttpStatusCode.valueOf(404))) {
                 return Optional.empty();
+            }
+            if (e.getStatusCode().equals(HttpStatusCode.valueOf(403))) {
+                throw new ScoreForbiddenException("Sem permissão para consultar o score (read:scores)");
             }
             throw new ScoreUnavailableException("Score API respondeu " + e.getStatusCode());
         } catch (RestClientException e) {

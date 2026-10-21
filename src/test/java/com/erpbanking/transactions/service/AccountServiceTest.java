@@ -6,6 +6,7 @@ import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.when;
 
 import java.math.BigDecimal;
+import java.util.List;
 import java.util.Optional;
 
 import org.junit.jupiter.api.Test;
@@ -13,6 +14,7 @@ import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.InjectMocks;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
+import org.springframework.data.domain.Sort;
 
 import com.erpbanking.transactions.domain.Account;
 import com.erpbanking.transactions.dto.AccountCreateRequest;
@@ -61,5 +63,19 @@ class AccountServiceTest {
         when(repo.findById(999L)).thenReturn(Optional.empty());
         assertThatThrownBy(() -> service.get(999L))
                 .isInstanceOf(AccountNotFoundException.class);
+    }
+
+    @Test
+    void listFiltersByCustomerWhenInformed() {
+        Account a = new Account(7L, BigDecimal.TEN);
+        when(repo.findByCustomerIdOrderByIdDesc(7L)).thenReturn(List.of(a));
+        assertThat(service.list(7L)).containsExactly(a);
+    }
+
+    @Test
+    void listReturnsAllNewestFirstWithoutCustomer() {
+        Account a = new Account(1L, BigDecimal.ONE);
+        when(repo.findAll(Sort.by(Sort.Direction.DESC, "id"))).thenReturn(List.of(a));
+        assertThat(service.list(null)).containsExactly(a);
     }
 }

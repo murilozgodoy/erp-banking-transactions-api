@@ -1,19 +1,21 @@
 # ERP Banking - Transactions API
 
 Serviço responsável por contas, transações e contratos de crédito. Consome a Credit Score API antes de aprovar operações de crédito.
+Documentação central do projeto em [erp-banking-front/docs](https://github.com/murilozgodoy/erp-banking-front/tree/main/docs).
 
 ## Requisitos
 
 - JDK 21+ (funciona em Java 25)
-- Maven 3.9+ (ou usar `mvnw` gerado localmente)
+- Maven 3.9+
 
 ## Executar
 
 ```bash
+cp .env.example .env    # lido automaticamente em dev (spring.config.import)
 mvn spring-boot:run
 ```
 
-Porta padrão: 8080. H2 in-memory por padrão. Docs H2 desativado.
+Porta padrão: 8080. H2 in-memory por padrão. Console H2 desativado.
 
 Health: `GET http://localhost:8080/health`
 
@@ -29,27 +31,34 @@ mvn verify
 
 ## Configuração
 
-Perfil default: H2 in-memory. Perfil `prod`: PostgreSQL via env vars.
+Em dev, as variáveis vêm do `.env` na raiz do projeto (opcional; ver `.env.example`).
+Em produção, defina-as no ambiente do processo/container (têm precedência sobre o `.env`).
 
 | Var | Padrão | Descrição |
 |-----|--------|-----------|
 | `SERVER_PORT` | 8080 | Porta HTTP |
+| `AUTH0_DOMAIN` | — (obrigatória) | Domínio do tenant, sem `https://` |
+| `AUTH0_AUDIENCE` | — (obrigatória) | Identifier da API no Auth0: `https://erp-banking-api` |
+| `CORS_ORIGINS` | `http://localhost:5173` | Origens do frontend, separadas por vírgula |
+| `CREDIT_SCORE_API_URL` | `http://localhost:8082` | URL do Score |
 | `DATABASE_URL` | `jdbc:h2:mem:transactions;...` | JDBC URL |
 | `DATABASE_USER` | sa | usuário |
 | `DATABASE_PASSWORD` | (vazio) | senha |
 | `DATABASE_DRIVER` | `org.h2.Driver` | driver |
-| `CREDIT_SCORE_API_URL` | `http://localhost:8002` | URL do Score |
 
 ## Endpoints
 
-| Método | Rota | Descrição |
-|--------|------|-----------|
-| GET | `/health` | Health check |
-| POST | `/accounts` | Cria conta |
-| GET | `/accounts/{id}` | Consulta conta |
-| POST | `/transactions` | Registra CREDIT / DEBIT |
-| POST | `/credits` | Solicita crédito (consulta Score) |
-| GET | `/credits/{id}` | Consulta situação do crédito |
+| Método | Rota | Permissão | Descrição |
+|--------|------|-----------|-----------|
+| GET | `/health` | pública | Health check |
+| GET | `/accounts?customerId=` | `read:accounts` | Lista contas (todas ou de um cliente) |
+| POST | `/accounts` | `write:accounts` | Cria conta |
+| GET | `/accounts/{id}` | `read:accounts` | Consulta conta |
+| GET | `/accounts/{id}/transactions` | `read:accounts` | Extrato, com o saldo após cada lançamento |
+| POST | `/transactions` | `write:accounts` | Registra CREDIT / DEBIT |
+| GET | `/credits?customerId=` | `read:credits` | Lista pedidos de crédito |
+| POST | `/credits` | `write:credits` | Solicita crédito (consulta o Score) |
+| GET | `/credits/{id}` | `read:credits` | Consulta situação do crédito |
 
 ## Padrões de projeto aplicados
 
@@ -57,29 +66,21 @@ Perfil default: H2 in-memory. Perfil `prod`: PostgreSQL via env vars.
 - **Repository (Spring Data JPA)**: `AccountRepository`, `TransactionRepository`, `CreditRequestRepository`, `ContractRepository`
 - Preparado para **Strategy** de política de crédito nas próximas etapas
 
-## Autenticação Auth0 (Etapa 3)
+## Autenticação e autorização (Auth0)
 
-Envie o **access token** em `Authorization: Bearer <token>`.
-A API valida assinatura RS256 via JWKS, issuer HTTPS com barra final,
-audience e expiração. `/health` permanece público; preflight CORS não exige token.
-Sem token ou com token inválido: **401**, com `WWW-Authenticate: Bearer`.
-Roles/permissões por rota ainda não são exigidas; não há uma regra de 403 por escopo nesta etapa.
+Resource server do Spring Security (`SecurityConfig`): valida a assinatura RS256 via JWKS, o
+issuer (`https://<AUTH0_DOMAIN>/`), a audience, a expiração e o `sub`.
 
-Configure `AUTH0_DOMAIN` (somente hostname, sem https:// nem barra final) e
-`AUTH0_AUDIENCE` (Identifier da API no Auth0). O valor `https://erp-banking-api`
-no exemplo precisa ser confirmado no painel e deve coincidir com `VITE_AUTH0_AUDIENCE`.
-Não use ID token ou token opaco. Nenhuma credencial de client secret é necessária para validar JWT.
+- Sem token ou com token inválido: **401** (`WWW-Authenticate: Bearer`).
+- Token sem a permissão da rota: **403**. As permissões da claim `permissions` (RBAC do Auth0) e
+  de `scope` viram authorities do Spring.
+- `/health` é público; os endpoints do Actuator exigem token. Preflight CORS não exige token.
+- Sem `AUTH0_DOMAIN` ou `AUTH0_AUDIENCE`, a inicialização falha explicitamente.
 
-CORS permite `http://localhost:5173`, os métodos utilizados e os headers
-`Authorization` e `Content-Type`. Configure `CORS_ORIGINS` para produção.
+**Token relay:** o `RestTemplate` usado pelo `CreditScoreClient` tem um interceptor
+(`BearerTokenRelayInterceptor`) que repassa o token do usuário à Credit Score API. Solicitar
+crédito exige `write:credits` aqui **e** `read:scores` no Score; se faltar a segunda, a
+resposta é 403 com o motivo.
 
-Os testes usam chaves RSA e tokens locais ou autenticação simulada, sem chamadas ao Auth0.
-
-**Pendente de decisão:** as chamadas Score → Onboarding e Transactions → Score
-precisam de propagação do token do usuário ou Machine-to-Machine. Os clients atuais
-ainda não enviam credenciais: esses fluxos entre serviços retornarão erro até a escolha ser implementada.
-
-Spring Boot exige as variáveis no ambiente do processo; não lê `.env` automaticamente.
-Sem `AUTH0_DOMAIN` ou `AUTH0_AUDIENCE`, a inicialização falha explicitamente.
-`CORS_ORIGINS` usa origens separadas por vírgula.
-O perfil `test` fornece configuração fictícia e não deve ser usado em produção.
+Nos testes, `spring-security-test` (`jwt()` com authorities) e um JWKS local; o perfil `test`
+fornece configuração fictícia e não deve ser usado em produção.

@@ -5,7 +5,7 @@ import org.springframework.boot.context.properties.ConfigurationProperties;
 @ConfigurationProperties(prefix = "credit-score")
 public class CreditScoreProperties {
 
-    private String baseUrl = "http://localhost:8002";
+    private String baseUrl = "http://localhost:8082";
     private int timeoutMs = 5000;
 
     public String getBaseUrl() {

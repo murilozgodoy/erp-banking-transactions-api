@@ -10,7 +10,7 @@ import org.springframework.web.client.RestTemplate;
 
 /**
  * Configura o RestTemplate como Singleton (padrão Spring @Bean).
- * Reutilizado por todos os clients HTTP internos do serviço.
+ * Reutilizado por todos os clients HTTP internos do serviço; repassa o token do usuário.
  */
 @Configuration
 @EnableConfigurationProperties(CreditScoreProperties.class)
@@ -22,6 +22,7 @@ public class RestClientConfig {
         return builder
                 .setConnectTimeout(Duration.ofMillis(props.getTimeoutMs()))
                 .setReadTimeout(Duration.ofMillis(props.getTimeoutMs()))
+                .additionalInterceptors(new BearerTokenRelayInterceptor())
                 .build();
     }
 }
