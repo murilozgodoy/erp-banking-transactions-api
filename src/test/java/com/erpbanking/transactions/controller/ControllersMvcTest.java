@@ -21,9 +21,11 @@ import org.springframework.boot.test.autoconfigure.web.servlet.AutoConfigureMock
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.boot.test.mock.mockito.MockBean;
 import org.springframework.http.MediaType;
+import org.springframework.security.core.authority.SimpleGrantedAuthority;
 import org.springframework.test.context.ActiveProfiles;
 import org.springframework.test.web.servlet.MockMvc;
 
+import com.erpbanking.transactions.config.SecurityConfig;
 import com.erpbanking.transactions.dto.ScoreResponse;
 import com.erpbanking.transactions.service.client.CreditScoreClient;
 
@@ -38,7 +40,11 @@ class ControllersMvcTest {
     @BeforeEach
     void authenticatedClient() {
         mockMvc = MockMvcBuilders.webAppContextSetup(context).apply(springSecurity())
-                .defaultRequest(get("/").with(jwt())).build();
+                .defaultRequest(get("/").with(jwt().authorities(
+                        new SimpleGrantedAuthority(SecurityConfig.READ_ACCOUNTS),
+                        new SimpleGrantedAuthority(SecurityConfig.WRITE_ACCOUNTS),
+                        new SimpleGrantedAuthority(SecurityConfig.READ_CREDITS),
+                        new SimpleGrantedAuthority(SecurityConfig.WRITE_CREDITS)))).build();
     }
 
     @MockBean CreditScoreClient creditScoreClient;

@@ -1,6 +1,7 @@
 package com.erpbanking.transactions.config;
 
 import java.time.Instant;
+import java.util.List;
 import java.util.Map;
 
 import org.junit.jupiter.api.Test;
@@ -8,6 +9,8 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.autoconfigure.web.servlet.AutoConfigureMockMvc;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.boot.test.mock.mockito.MockBean;
+import org.springframework.security.core.GrantedAuthority;
+import org.springframework.security.core.authority.SimpleGrantedAuthority;
 import org.springframework.security.oauth2.jwt.*;
 import org.springframework.test.context.ActiveProfiles;
 import org.springframework.test.web.servlet.MockMvc;
@@ -34,7 +37,49 @@ class SecurityConfigTest {
         }
         mvc.perform(post("/accounts").contentType("application/json").content("{}"))
                 .andExpect(status().isUnauthorized());
-        mvc.perform(get("/accounts/999999").with(jwt())).andExpect(status().isNotFound());
+        mvc.perform(get("/accounts/999999").with(jwt().authorities(new SimpleGrantedAuthority("read:accounts"))))
+                .andExpect(status().isNotFound());
+    }
+
+    @Test
+    void missingPermissionIsForbidden() throws Exception {
+        mvc.perform(get("/accounts/1").with(jwt())).andExpect(status().isForbidden());
+        mvc.perform(get("/credits/1").with(jwt().authorities(new SimpleGrantedAuthority("read:accounts"))))
+                .andExpect(status().isForbidden());
+        mvc.perform(post("/credits").with(jwt().authorities(new SimpleGrantedAuthority("read:credits")))
+                        .contentType("application/json").content("{}"))
+                .andExpect(status().isForbidden());
+        mvc.perform(post("/transactions").with(jwt().authorities(new SimpleGrantedAuthority("read:accounts")))
+                        .contentType("application/json").content("{}"))
+                .andExpect(status().isForbidden());
+    }
+
+    @Test
+    void permissionsClaimOfRealTokenAuthorizes() throws Exception {
+        Instant now = Instant.now();
+        Jwt token = Jwt.withTokenValue("rbac").header("alg", "RS256").subject("auth0|user")
+                .issuedAt(now).expiresAt(now.plusSeconds(300))
+                .claim("permissions", List.of("read:accounts")).build();
+        when(decoder.decode("rbac")).thenReturn(token);
+        mvc.perform(get("/accounts/999999").header("Authorization", "Bearer rbac"))
+                .andExpect(status().isNotFound());
+        mvc.perform(post("/accounts").header("Authorization", "Bearer rbac")
+                        .contentType("application/json").content("{}"))
+                .andExpect(status().isForbidden());
+    }
+
+    @Test
+    void permissionsComeFromPermissionsAndScopeClaims() {
+        Instant now = Instant.now();
+        Jwt both = Jwt.withTokenValue("t").header("alg", "RS256").issuedAt(now).expiresAt(now.plusSeconds(60))
+                .claim("permissions", List.of("read:accounts", "write:credits"))
+                .claim("scope", "openid  read:accounts read:credits").build();
+        assertThat(SecurityConfig.permissions(both)).extracting(GrantedAuthority::getAuthority)
+                .containsExactly("read:accounts", "write:credits", "openid", "read:credits");
+        Jwt none = Jwt.withTokenValue("t").header("alg", "RS256").claim("sub", "user").build();
+        assertThat(SecurityConfig.permissions(none)).isEmpty();
+        Jwt blankScope = Jwt.withTokenValue("t").header("alg", "RS256").claim("scope", " ").build();
+        assertThat(SecurityConfig.permissions(blankScope)).isEmpty();
     }
 
     @Test
