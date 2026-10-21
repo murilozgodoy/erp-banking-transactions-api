@@ -1,6 +1,8 @@
 package com.erpbanking.transactions.service;
 
 import java.math.BigDecimal;
+import java.util.ArrayList;
+import java.util.List;
 
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -10,6 +12,7 @@ import com.erpbanking.transactions.domain.AccountStatus;
 import com.erpbanking.transactions.domain.Transaction;
 import com.erpbanking.transactions.domain.TransactionType;
 import com.erpbanking.transactions.dto.TransactionRequest;
+import com.erpbanking.transactions.dto.TransactionResponse;
 import com.erpbanking.transactions.exception.ApiExceptions.AccountBlockedException;
 import com.erpbanking.transactions.exception.ApiExceptions.AccountNotFoundException;
 import com.erpbanking.transactions.exception.ApiExceptions.InsufficientFundsException;
@@ -51,6 +54,23 @@ public class TransactionService {
         accountRepository.save(account);
         Transaction saved = transactionRepository.save(new Transaction(account.getId(), req.tipo(), req.valor()));
         return new TransactionResult(saved, novoSaldo);
+    }
+
+    /**
+     * Extrato da conta, do lançamento mais recente para o mais antigo. O saldo de cada
+     * linha é o saldo logo após o lançamento, reconstruído a partir do saldo atual.
+     */
+    public List<TransactionResponse> statement(Long accountId) {
+        Account account = accountRepository.findById(accountId)
+                .orElseThrow(() -> new AccountNotFoundException("Conta " + accountId + " não encontrada"));
+
+        List<TransactionResponse> statement = new ArrayList<>();
+        BigDecimal saldo = account.getSaldo();
+        for (Transaction t : transactionRepository.findByAccountIdOrderByTimestampDescIdDesc(accountId)) {
+            statement.add(TransactionResponse.of(t, saldo));
+            saldo = t.getTipo() == TransactionType.CREDIT ? saldo.subtract(t.getValor()) : saldo.add(t.getValor());
+        }
+        return statement;
     }
 
     public record TransactionResult(Transaction transaction, BigDecimal saldoAtual) {}

@@ -2,8 +2,13 @@ package com.erpbanking.transactions.service;
 
 import java.math.BigDecimal;
 import java.math.RoundingMode;
+import java.util.List;
+import java.util.Map;
 import java.util.Optional;
+import java.util.function.Function;
+import java.util.stream.Collectors;
 
+import org.springframework.data.domain.Sort;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -73,6 +78,22 @@ public class CreditService {
         BigDecimal valorAprovado = contract.map(Contract::getValorAprovado).orElse(BigDecimal.ZERO);
         BigDecimal taxa = contract.map(Contract::getTaxaJuros).orElse(BigDecimal.ZERO);
         return CreditResponseDto.of(cr, valorAprovado, taxa);
+    }
+
+    /** Pedidos de crédito mais recentes primeiro; filtra pelo cliente quando informado. */
+    public List<CreditResponseDto> listar(Long customerId) {
+        List<CreditRequest> requests = customerId == null
+                ? creditRequestRepository.findAll(Sort.by(Sort.Direction.DESC, "id"))
+                : creditRequestRepository.findByCustomerIdOrderByIdDesc(customerId);
+        Map<Long, Contract> contracts = contractRepository
+                .findByCreditRequestIdIn(requests.stream().map(CreditRequest::getId).toList()).stream()
+                .collect(Collectors.toMap(Contract::getCreditRequestId, Function.identity()));
+        return requests.stream().map(cr -> {
+            Contract contract = contracts.get(cr.getId());
+            return contract == null
+                    ? CreditResponseDto.of(cr, BigDecimal.ZERO, BigDecimal.ZERO)
+                    : CreditResponseDto.of(cr, contract.getValorAprovado(), contract.getTaxaJuros());
+        }).toList();
     }
 
     private DecisionOutcome decide(String faixaRisco, BigDecimal valor) {

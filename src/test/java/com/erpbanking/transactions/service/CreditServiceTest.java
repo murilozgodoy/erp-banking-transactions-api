@@ -10,6 +10,7 @@ import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 import java.math.BigDecimal;
+import java.util.List;
 import java.util.Optional;
 
 import org.junit.jupiter.api.Test;
@@ -17,6 +18,7 @@ import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.InjectMocks;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
+import org.springframework.data.domain.Sort;
 
 import com.erpbanking.transactions.domain.Contract;
 import com.erpbanking.transactions.domain.CreditRequest;
@@ -130,5 +132,39 @@ class CreditServiceTest {
         when(crRepo.findById(99L)).thenReturn(Optional.empty());
         assertThatThrownBy(() -> service.consultar(99L))
                 .isInstanceOf(CreditRequestNotFoundException.class);
+    }
+
+    private static CreditRequest request(long id, long customerId, CreditStatus status) {
+        CreditRequest cr = new CreditRequest();
+        cr.setId(id);
+        cr.setCustomerId(customerId);
+        cr.setValorSolicitado(new BigDecimal("1000"));
+        cr.setPrazoMeses(12);
+        cr.setStatus(status);
+        return cr;
+    }
+
+    @Test
+    void listarJoinsContractsOfApprovedRequests() {
+        CreditRequest approved = request(2L, 5L, CreditStatus.APROVADO);
+        CreditRequest denied = request(1L, 5L, CreditStatus.NEGADO);
+        when(crRepo.findByCustomerIdOrderByIdDesc(5L)).thenReturn(List.of(approved, denied));
+        when(contractRepo.findByCreditRequestIdIn(List.of(2L, 1L)))
+                .thenReturn(List.of(new Contract(2L, new BigDecimal("0.0299"), new BigDecimal("1000"))));
+
+        var result = service.listar(5L);
+
+        assertThat(result).extracting(r -> r.id()).containsExactly(2L, 1L);
+        assertThat(result.get(0).valorAprovado()).isEqualByComparingTo("1000");
+        assertThat(result.get(0).taxaJuros()).isEqualByComparingTo("0.0299");
+        assertThat(result.get(1).valorAprovado()).isEqualByComparingTo("0");
+    }
+
+    @Test
+    void listarWithoutCustomerReturnsAllNewestFirst() {
+        when(crRepo.findAll(Sort.by(Sort.Direction.DESC, "id"))).thenReturn(List.of(request(3L, 1L, CreditStatus.REVISAO)));
+        when(contractRepo.findByCreditRequestIdIn(List.of(3L))).thenReturn(List.of());
+
+        assertThat(service.listar(null)).extracting(r -> r.status()).containsExactly(CreditStatus.REVISAO);
     }
 }

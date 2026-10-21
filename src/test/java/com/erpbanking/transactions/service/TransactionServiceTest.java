@@ -8,6 +8,7 @@ import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 import java.math.BigDecimal;
+import java.util.List;
 import java.util.Optional;
 
 import org.junit.jupiter.api.BeforeEach;
@@ -89,5 +90,26 @@ class TransactionServiceTest {
         assertThatThrownBy(() -> service.register(
                 new TransactionRequest(99L, TransactionType.CREDIT, new BigDecimal("10"))))
                 .isInstanceOf(AccountNotFoundException.class);
+    }
+
+    @Test
+    void statementRebuildsBalanceAfterEachTransaction() {
+        // Saldo atual 100 = 50 (inicial) + 80 (crédito) - 30 (débito mais recente).
+        Transaction debit = new Transaction(10L, TransactionType.DEBIT, new BigDecimal("30.00"));
+        Transaction credit = new Transaction(10L, TransactionType.CREDIT, new BigDecimal("80.00"));
+        when(accountRepo.findById(10L)).thenReturn(Optional.of(account));
+        when(txRepo.findByAccountIdOrderByTimestampDescIdDesc(10L)).thenReturn(List.of(debit, credit));
+
+        var statement = service.statement(10L);
+
+        assertThat(statement).extracting(r -> r.tipo()).containsExactly(TransactionType.DEBIT, TransactionType.CREDIT);
+        assertThat(statement.get(0).saldoAtual()).isEqualByComparingTo("100.00");
+        assertThat(statement.get(1).saldoAtual()).isEqualByComparingTo("130.00");
+    }
+
+    @Test
+    void statementFailsWhenAccountNotFound() {
+        when(accountRepo.findById(99L)).thenReturn(Optional.empty());
+        assertThatThrownBy(() -> service.statement(99L)).isInstanceOf(AccountNotFoundException.class);
     }
 }

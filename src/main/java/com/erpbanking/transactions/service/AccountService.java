@@ -1,7 +1,9 @@
 package com.erpbanking.transactions.service;
 
 import java.math.BigDecimal;
+import java.util.List;
 
+import org.springframework.data.domain.Sort;
 import org.springframework.stereotype.Service;
 
 import com.erpbanking.transactions.domain.Account;
@@ -26,5 +28,13 @@ public class AccountService {
     public Account get(Long id) {
         return accountRepository.findById(id)
                 .orElseThrow(() -> new AccountNotFoundException("Conta " + id + " não encontrada"));
+    }
+
+    /** Contas mais recentes primeiro; filtra pelo cliente quando informado. */
+    public List<Account> list(Long customerId) {
+        if (customerId == null) {
+            return accountRepository.findAll(Sort.by(Sort.Direction.DESC, "id"));
+        }
+        return accountRepository.findByCustomerIdOrderByIdDesc(customerId);
     }
 }

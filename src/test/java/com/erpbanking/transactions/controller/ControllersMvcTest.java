@@ -75,6 +75,39 @@ class ControllersMvcTest {
     }
 
     @Test
+    void listAccountsByCustomerAndStatement() throws Exception {
+        String created = mockMvc.perform(post("/accounts")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"customerId\":77,\"saldoInicial\":100.00}"))
+                .andReturn().getResponse().getContentAsString();
+        Long id = Long.parseLong(created.replaceAll(".*\"id\":(\\d+).*", "$1"));
+        mockMvc.perform(post("/transactions")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"accountId\":" + id + ",\"tipo\":\"CREDIT\",\"valor\":50.00}"))
+                .andExpect(status().isCreated());
+        mockMvc.perform(post("/transactions")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"accountId\":" + id + ",\"tipo\":\"DEBIT\",\"valor\":20.00}"))
+                .andExpect(status().isCreated());
+
+        mockMvc.perform(get("/accounts").param("customerId", "77"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.length()").value(1))
+                .andExpect(jsonPath("$[0].saldo").value(130.00));
+        mockMvc.perform(get("/accounts"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$[0].id").value(id));
+        mockMvc.perform(get("/accounts/" + id + "/transactions"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.length()").value(2))
+                .andExpect(jsonPath("$[0].tipo").value("DEBIT"))
+                .andExpect(jsonPath("$[0].saldoAtual").value(130.00))
+                .andExpect(jsonPath("$[1].saldoAtual").value(150.00));
+        mockMvc.perform(get("/accounts/999999/transactions"))
+                .andExpect(status().isNotFound());
+    }
+
+    @Test
     void getAccountNotFoundReturns404() throws Exception {
         mockMvc.perform(get("/accounts/999999"))
                 .andExpect(status().isNotFound());
@@ -166,6 +199,25 @@ class ControllersMvcTest {
                         .content("{\"customerId\":12,\"valor\":1000.00,\"prazoMeses\":6}"))
                 .andExpect(status().isForbidden())
                 .andExpect(jsonPath("$.error", containsString("read:scores")));
+    }
+
+    @Test
+    void listarCreditosDoCliente() throws Exception {
+        when(creditScoreClient.getLatestScore(any()))
+                .thenReturn(Optional.of(new ScoreResponse(88L, 900.0, "BAIXO")));
+        mockMvc.perform(post("/credits")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"customerId\":88,\"valor\":2000.00,\"prazoMeses\":10}"))
+                .andExpect(status().isCreated());
+
+        mockMvc.perform(get("/credits").param("customerId", "88"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.length()").value(1))
+                .andExpect(jsonPath("$[0].status").value("APROVADO"))
+                .andExpect(jsonPath("$[0].valorAprovado").value(2000.00));
+        mockMvc.perform(get("/credits").param("customerId", "123456"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.length()").value(0));
     }
 
     @Test
