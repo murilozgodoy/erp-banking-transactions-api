@@ -101,24 +101,66 @@ class PortalSeederTest {
     void reusesExistingAccountAndKeepsItsBalance() {
         Account existing = new Account(42L, new BigDecimal("100.00"));
         existing.setId(3L);
-        when(accountService.openForNewCustomer(42L)).thenReturn(Optional.empty());
-        when(accounts.findByCustomerIdOrderByIdDesc(42L)).thenReturn(List.of(existing));
+        when(accounts.findIdsByCustomerId(42L)).thenReturn(List.of(3L));
+        when(accounts.findByIdForUpdate(3L)).thenReturn(Optional.of(existing));
 
         assertThat(seeder.seed(profile)).isEqualTo(PortalSeeder.Outcome.SEEDED);
 
         assertThat(existing.getSaldo()).isGreaterThan(new BigDecimal("100.00"));
         verify(accounts).save(existing);
+        verifyNoInteractions(accountService);
+    }
+
+    @Test
+    void accountOpenedConcurrentlyIsLockedAndReused() {
+        Account existing = new Account(42L, new BigDecimal("100.00"));
+        existing.setId(3L);
+        when(accounts.findIdsByCustomerId(42L)).thenReturn(List.of(), List.of(3L));
+        when(accountService.openForNewCustomer(42L)).thenReturn(Optional.empty());
+        when(accounts.findByIdForUpdate(3L)).thenReturn(Optional.of(existing));
+
+        assertThat(seeder.seed(profile)).isEqualTo(PortalSeeder.Outcome.SEEDED);
+
+        verify(accounts).findByIdForUpdate(3L);
+        verify(accounts).save(existing);
+    }
+
+    private void existingAccount() {
+        Account existing = new Account(42L, new BigDecimal("100.00"));
+        existing.setId(3L);
+        when(accounts.findIdsByCustomerId(42L)).thenReturn(List.of(3L));
+        when(accounts.findByIdForUpdate(3L)).thenReturn(Optional.of(existing));
+    }
+
+    private void assertNotSeeded() {
+        assertThat(seeder.seed(profile)).isEqualTo(PortalSeeder.Outcome.ALREADY_SEEDED);
+        verify(accounts).findByIdForUpdate(3L);
+        verifyNoInteractions(accountService, receivables, transactions);
+        verify(sales, never()).saveAll(anyList());
+        verify(payables, never()).saveAll(anyList());
+        verify(inventory, never()).saveAll(anyList());
+        verify(accounts, never()).save(any());
     }
 
     @Test
     void customerWithSalesIsNotSeededAgain() {
+        existingAccount();
         when(sales.existsByCustomerId(42L)).thenReturn(true);
+        assertNotSeeded();
+    }
 
-        assertThat(seeder.seed(profile)).isEqualTo(PortalSeeder.Outcome.ALREADY_SEEDED);
+    @Test
+    void customerWithPayablesOnlyIsNotSeededAgain() {
+        existingAccount();
+        when(payables.existsByCustomerId(42L)).thenReturn(true);
+        assertNotSeeded();
+    }
 
-        verifyNoInteractions(accountService, receivables, payables, inventory, transactions);
-        verify(sales, never()).saveAll(anyList());
-        verify(accounts, never()).save(any());
+    @Test
+    void customerWithInventoryOnlyIsNotSeededAgain() {
+        existingAccount();
+        when(inventory.existsByCustomerId(42L)).thenReturn(true);
+        assertNotSeeded();
     }
 
     @Test

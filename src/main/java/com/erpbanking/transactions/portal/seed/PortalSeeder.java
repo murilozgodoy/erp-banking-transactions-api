@@ -4,6 +4,7 @@ import java.time.Clock;
 import java.time.LocalDate;
 import java.time.ZoneId;
 import java.util.List;
+import java.util.Optional;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -28,7 +29,9 @@ import com.erpbanking.transactions.service.AccountService;
  * Popula o portal do cliente PJ (evento {@code customer.onboarding_submitted}). Tudo numa transação:
  * abre a conta corrente se ainda não existir (PJ não recebe {@code customer.created}), grava vendas,
  * recebíveis, contas a pagar, estoque e o extrato dos últimos 30 dias, e ajusta o saldo da conta.
- * Idempotente: se o cliente já tem vendas, não faz nada.
+ * Idempotente: se o cliente já tem vendas, contas a pagar ou estoque, não faz nada. A conta corrente é
+ * travada ({@code SELECT ... FOR UPDATE}) antes dessa verificação, então entregas paralelas do mesmo evento
+ * são serializadas e só a primeira popula.
  */
 @Service
 public class PortalSeeder {
@@ -72,11 +75,11 @@ public class PortalSeeder {
     @Transactional
     public Outcome seed(SeedProfile profile) {
         long customerId = profile.customerId();
-        if (sales.existsByCustomerId(customerId)) {
+        Account account = lockedAccount(customerId);
+        if (sales.existsByCustomerId(customerId) || payables.existsByCustomerId(customerId)
+                || inventory.existsByCustomerId(customerId)) {
             return Outcome.ALREADY_SEEDED;
         }
-        Account account = accountService.openForNewCustomer(customerId)
-                .orElseGet(() -> accounts.findByCustomerIdOrderByIdDesc(customerId).get(0));
 
         SeedData data = generator.generate(profile, LocalDate.now(clock), clock.getZone());
 
@@ -96,6 +99,19 @@ public class PortalSeeder {
                         + "conta {} com saldo {}", customerId, saved.size(), recs.size(), data.payables().size(),
                 data.inventory().size(), account.getId(), account.getSaldo());
         return Outcome.SEEDED;
+    }
+
+    /** Conta corrente mais recente travada (busca só o id antes do lock); abre uma se ainda não existir. */
+    private Account lockedAccount(long customerId) {
+        List<Long> ids = accounts.findIdsByCustomerId(customerId);
+        if (ids.isEmpty()) {
+            Optional<Account> opened = accountService.openForNewCustomer(customerId);
+            if (opened.isPresent()) {
+                return opened.get();
+            }
+            ids = accounts.findIdsByCustomerId(customerId);
+        }
+        return accounts.findByIdForUpdate(ids.get(0)).orElseThrow();
     }
 
     private static Receivable link(ReceivableDraft draft, List<Sale> saved) {

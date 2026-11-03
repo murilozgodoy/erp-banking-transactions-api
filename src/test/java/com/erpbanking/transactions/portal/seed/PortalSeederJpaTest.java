@@ -2,12 +2,23 @@ package com.erpbanking.transactions.portal.seed;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
+import java.math.BigDecimal;
+import java.time.LocalDate;
+import java.util.ArrayList;
+import java.util.List;
 import java.util.Map;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.Future;
+import java.util.concurrent.TimeUnit;
 
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.autoconfigure.orm.jpa.DataJpaTest;
 import org.springframework.context.annotation.Import;
+import org.springframework.transaction.annotation.Propagation;
+import org.springframework.transaction.annotation.Transactional;
 
 import com.erpbanking.transactions.domain.Account;
 import com.erpbanking.transactions.repository.AccountRepository;
@@ -49,5 +60,38 @@ class PortalSeederJpaTest {
                 .allSatisfy(r -> assertThat(sales.findById(r.getSaleId())).isPresent());
         assertThat(payables.existsByCustomerId(77L)).isTrue();
         assertThat(inventory.findByCustomerIdOrderBySkuAsc(77L)).hasSizeBetween(15, 40);
+    }
+
+    /** Entregas paralelas do mesmo evento: o lock da conta serializa e só uma popula. */
+    @Test
+    @Transactional(propagation = Propagation.NOT_SUPPORTED)
+    void parallelDeliveriesSeedOnlyOnce() throws Exception {
+        accounts.save(new Account(78L, new BigDecimal("100.00")));
+        SeedProfile profile = SeedProfile.from(78, Map.of("segmento", "varejo",
+                "respostas", Map.of("faturamento_mensal", 90000, "possui_estoque", true)));
+
+        ExecutorService pool = Executors.newFixedThreadPool(3);
+        CountDownLatch start = new CountDownLatch(1);
+        List<Future<PortalSeeder.Outcome>> futures = new ArrayList<>();
+        for (int i = 0; i < 3; i++) {
+            futures.add(pool.submit(() -> {
+                start.await();
+                return seeder.seed(profile);
+            }));
+        }
+        start.countDown();
+        List<PortalSeeder.Outcome> outcomes = new ArrayList<>();
+        for (Future<PortalSeeder.Outcome> f : futures) {
+            outcomes.add(f.get(60, TimeUnit.SECONDS));
+        }
+        pool.shutdownNow();
+
+        assertThat(outcomes).containsOnlyOnce(PortalSeeder.Outcome.SEEDED);
+        Account account = accounts.findByCustomerIdOrderByIdDesc(78L).get(0);
+        long credits = transactions.findByAccountIdOrderByTimestampDescIdDesc(account.getId()).size();
+        assertThat(credits).isPositive();
+        long salesOf78 = sales.findAll().stream().filter(s -> s.getCustomerId() == 78L).count();
+        assertThat(salesOf78).isEqualTo(new PortalDataGenerator()
+                .generate(profile, LocalDate.now(PortalSeeder.ZONE), PortalSeeder.ZONE).sales().size());
     }
 }
