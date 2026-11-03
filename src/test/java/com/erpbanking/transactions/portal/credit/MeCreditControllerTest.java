@@ -11,7 +11,15 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 
 import java.math.BigDecimal;
 import java.time.LocalDate;
+import java.util.ArrayList;
+import java.util.List;
 import java.util.Optional;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.ExecutionException;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.Future;
+import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicLong;
 
 import org.junit.jupiter.api.BeforeEach;
@@ -28,7 +36,13 @@ import org.springframework.test.web.servlet.ResultActions;
 import org.springframework.test.web.servlet.request.MockHttpServletRequestBuilder;
 
 import com.erpbanking.transactions.config.SecurityConfig;
+import com.erpbanking.transactions.domain.CreditRequest;
 import com.erpbanking.transactions.domain.CreditSimulation;
+import com.erpbanking.transactions.domain.CreditStatus;
+import com.erpbanking.transactions.dto.CreditResponseDto;
+import com.erpbanking.transactions.portal.PortalExceptions.BusinessRuleException;
+import com.erpbanking.transactions.portal.credit.CreditDtos.PortalCreditRequest;
+import com.erpbanking.transactions.repository.CreditRequestRepository;
 import com.erpbanking.transactions.domain.InventoryItem;
 import com.erpbanking.transactions.domain.PaymentMethod;
 import com.erpbanking.transactions.domain.Receivable;
@@ -55,6 +69,8 @@ class MeCreditControllerTest {
     @Autowired InventoryItemRepository inventory;
     @Autowired CreditSimulationRepository simulations;
     @Autowired ContractRepository contracts;
+    @Autowired CreditRequestRepository creditRequests;
+    @Autowired PortalCreditService credit;
     @MockBean CurrentCustomerResolver resolver;
     @MockBean ScoreAnalysisClient scoreAnalysis;
 
@@ -260,6 +276,149 @@ class MeCreditControllerTest {
                 + "\"receivable_ids\":[" + outro.getId() + "]}")
                 .andExpect(status().isNotFound())
                 .andExpect(jsonPath("$.error").value("RECEBIVEL_NAO_ENCONTRADO"));
+    }
+
+    private long simulate(String json) throws Exception {
+        String body = postJson("/me/credit/simulations", json).andExpect(status().isCreated())
+                .andReturn().getResponse().getContentAsString();
+        return Long.parseLong(body.replaceAll("^\\{\"id\":(\\d+).*", "$1"));
+    }
+
+    private ReceivableStatus statusOf(Receivable r) {
+        return receivables.findById(r.getId()).orElseThrow().getStatus();
+    }
+
+    @Test
+    void antecipacaoAprovadaMarcaOsRecebiveisSelecionados() throws Exception {
+        Receivable a = receivable(customerId, "1000.00", ReceivableStatus.PREVISTO);
+        Receivable b = receivable(customerId, "9000.00", ReceivableStatus.PREVISTO);
+        long simId = simulate("{\"produto\":\"ANTECIPACAO_RECEBIVEIS\",\"valor\":800,\"prazo_meses\":3,"
+                + "\"receivable_ids\":[" + a.getId() + "]}");
+
+        postJson("/me/credit/requests", "{\"simulation_id\":" + simId + "}")
+                .andExpect(status().isCreated())
+                .andExpect(jsonPath("$.status").value("APROVADO"));
+
+        assertThat(statusOf(a)).isEqualTo(ReceivableStatus.ANTECIPADO);
+        assertThat(statusOf(b)).isEqualTo(ReceivableStatus.PREVISTO);
+        mockMvc.perform(authed(get("/me/credit/offers")))
+                .andExpect(jsonPath("$[0].produto").value("ANTECIPACAO_RECEBIVEIS"))
+                .andExpect(jsonPath("$[0].limite").value(7200.00));
+        // O recebível antecipado não pode ser usado de novo.
+        postJson("/me/credit/simulations", "{\"produto\":\"ANTECIPACAO_RECEBIVEIS\",\"valor\":800,\"prazo_meses\":3,"
+                + "\"receivable_ids\":[" + a.getId() + "]}")
+                .andExpect(status().isUnprocessableEntity())
+                .andExpect(jsonPath("$.error").value("RECEBIVEL_INDISPONIVEL"));
+    }
+
+    @Test
+    void antecipacaoSemSelecaoUsaOsRecebiveisAteCobrirOValor() throws Exception {
+        Receivable r1 = receivable(customerId, "1000.00", ReceivableStatus.PREVISTO);
+        Receivable r2 = receivable(customerId, "1000.00", ReceivableStatus.PREVISTO);
+        Receivable r3 = receivable(customerId, "1000.00", ReceivableStatus.PREVISTO);
+
+        postJson("/me/credit/requests", "{\"produto\":\"ANTECIPACAO_RECEBIVEIS\",\"valor\":1500,\"prazo_meses\":3}")
+                .andExpect(status().isCreated())
+                .andExpect(jsonPath("$.status").value("APROVADO"));
+
+        assertThat(statusOf(r1)).isEqualTo(ReceivableStatus.ANTECIPADO);
+        assertThat(statusOf(r2)).isEqualTo(ReceivableStatus.ANTECIPADO);
+        assertThat(statusOf(r3)).isEqualTo(ReceivableStatus.PREVISTO);
+    }
+
+    @Test
+    void antecipacaoNaoAprovadaNaoMarcaRecebiveis() throws Exception {
+        Receivable r = receivable(customerId, "1000.00", ReceivableStatus.PREVISTO);
+        postJson("/me/credit/requests", "{\"produto\":\"ANTECIPACAO_RECEBIVEIS\",\"valor\":5000,\"prazo_meses\":3}")
+                .andExpect(jsonPath("$.status").value("REVISAO"));
+        assertThat(statusOf(r)).isEqualTo(ReceivableStatus.PREVISTO);
+    }
+
+    @Test
+    void limiteDescontaOJaAprovadoNoMesmoProduto() throws Exception {
+        seed();
+        long primeira = simulate("{\"produto\":\"CAPITAL_DE_GIRO\",\"valor\":8000,\"prazo_meses\":12}");
+        long segunda = simulate("{\"produto\":\"CAPITAL_DE_GIRO\",\"valor\":8000,\"prazo_meses\":12}");
+
+        postJson("/me/credit/requests", "{\"simulation_id\":" + primeira + "}")
+                .andExpect(jsonPath("$.status").value("APROVADO"));
+
+        mockMvc.perform(authed(get("/me/credit/offers")))
+                .andExpect(jsonPath("$[1].produto").value("CAPITAL_DE_GIRO"))
+                .andExpect(jsonPath("$[1].limite").value(2000.00))
+                .andExpect(jsonPath("$[2].produto").value("ALAVANCAGEM"))
+                .andExpect(jsonPath("$[2].limite").value(30000.00));
+        postJson("/me/credit/simulations", "{\"produto\":\"CAPITAL_DE_GIRO\",\"valor\":3000,\"prazo_meses\":12}")
+                .andExpect(jsonPath("$.aprovacao").value("ANALISE"))
+                .andExpect(jsonPath("$.limite_disponivel").value(2000.00));
+
+        // Simulação feita antes da aprovação: o limite é recalculado no pedido.
+        postJson("/me/credit/requests", "{\"simulation_id\":" + segunda + "}")
+                .andExpect(jsonPath("$.status").value("REVISAO"))
+                .andExpect(jsonPath("$.motivo").value(org.hamcrest.Matchers.containsString("R$ 2000.00")));
+    }
+
+    @Test
+    void limiteDisponivelNuncaFicaNegativo() throws Exception {
+        seed();
+        CreditRequest aprovado = new CreditRequest();
+        aprovado.setCustomerId(customerId);
+        aprovado.setValorSolicitado(new BigDecimal("50000.00"));
+        aprovado.setPrazoMeses(12);
+        aprovado.setStatus(CreditStatus.APROVADO);
+        aprovado = creditRequests.save(aprovado);
+        CreditSimulation sim = new CreditSimulation();
+        sim.setCustomerId(customerId);
+        sim.setProduto("FINANCIAMENTO_ESTOQUE");
+        sim.setValor(new BigDecimal("50000.00"));
+        sim.setPrazoMeses(12);
+        sim.setTaxaMensal(new BigDecimal("2.49"));
+        sim.setAprovacao("PRE_APROVADO");
+        sim.setLimite(new BigDecimal("50000.00"));
+        sim.setValidade(LocalDate.now(PortalCreditService.ZONE));
+        sim.setCreditRequestId(aprovado.getId());
+        simulations.save(sim);
+
+        mockMvc.perform(authed(get("/me/credit/offers")))
+                .andExpect(jsonPath("$[3].produto").value("FINANCIAMENTO_ESTOQUE"))
+                .andExpect(jsonPath("$[3].limite").value(0));
+    }
+
+    @Test
+    void mesmaSimulacaoEmParaleloViraUmPedidoSo() throws Exception {
+        seed();
+        long simId = simulate("{\"produto\":\"CAPITAL_DE_GIRO\",\"valor\":1000,\"prazo_meses\":6}");
+        ExecutorService pool = Executors.newFixedThreadPool(4);
+        CountDownLatch start = new CountDownLatch(1);
+        List<Future<CreditResponseDto>> futures = new ArrayList<>();
+        for (int i = 0; i < 4; i++) {
+            futures.add(pool.submit(() -> {
+                start.await();
+                return credit.request(customerId, new PortalCreditRequest(simId, null, null, null));
+            }));
+        }
+        start.countDown();
+        int ok = 0;
+        for (Future<CreditResponseDto> f : futures) {
+            try {
+                f.get(30, TimeUnit.SECONDS);
+                ok++;
+            } catch (ExecutionException e) {
+                assertThat(e.getCause()).isInstanceOfSatisfying(BusinessRuleException.class,
+                        ex -> assertThat(ex.getCode()).isEqualTo("SIMULACAO_JA_UTILIZADA"));
+            }
+        }
+        pool.shutdownNow();
+        assertThat(ok).isEqualTo(1);
+        mockMvc.perform(authed(get("/me/credit/requests"))).andExpect(jsonPath("$", hasSize(1)));
+    }
+
+    @Test
+    void recebivelNuloNaListaDevolve400() throws Exception {
+        postJson("/me/credit/simulations", "{\"produto\":\"ANTECIPACAO_RECEBIVEIS\",\"valor\":800,\"prazo_meses\":3,"
+                + "\"receivable_ids\":[null]}")
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.error").value("validation_failed"));
     }
 
     @Test

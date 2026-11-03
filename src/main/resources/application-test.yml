@@ -17,3 +17,6 @@ auth0:
   audience: https://erp-banking-api
 cors:
   origins: http://localhost:5173
+portal:
+  payments:
+    scheduler-enabled: false

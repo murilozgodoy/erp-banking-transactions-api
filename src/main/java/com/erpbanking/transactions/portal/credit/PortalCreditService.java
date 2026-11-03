@@ -5,6 +5,7 @@ import java.math.RoundingMode;
 import java.time.Clock;
 import java.time.LocalDate;
 import java.time.ZoneId;
+import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.LinkedHashSet;
 import java.util.List;
@@ -91,7 +92,7 @@ public class PortalCreditService {
         BigDecimal estoque = inventoryValue(customerId);
         BigDecimal receita = revenue30d(customerId, today);
         return Arrays.stream(CreditProduct.values()).filter(CreditProduct::ofertado)
-                .map(p -> new Offer(p, CreditPricing.limite(p, recebiveis, estoque, receita),
+                .map(p -> new Offer(p, disponivel(customerId, p, CreditPricing.limite(p, recebiveis, estoque, receita)),
                         CreditPricing.taxaMensal(p, faixa), p.prazoMaxMeses()))
                 .toList();
     }
@@ -102,12 +103,17 @@ public class PortalCreditService {
                 req.receivableIds()));
     }
 
-    /** Pedido a partir de uma simulação ({@code simulation_id}) ou de produto, valor e prazo. */
+    /**
+     * Pedido a partir de uma simulação ({@code simulation_id}) ou de produto, valor e prazo. A simulação é
+     * travada ({@code SELECT ... FOR UPDATE}) para virar no máximo um pedido; na antecipação, os recebíveis do
+     * cliente também, e os usados ficam ANTECIPADO quando o pedido é aprovado.
+     */
     @Transactional
     public CreditResponseDto request(Long customerId, PortalCreditRequest req) {
         CreditSimulation sim;
+        List<Receivable> travados = List.of();
         if (req.simulationId() != null) {
-            sim = simulations.findById(req.simulationId())
+            sim = simulations.findByIdForUpdate(req.simulationId())
                     .filter(s -> customerId.equals(s.getCustomerId()))
                     .orElseThrow(() -> new NotFoundException("SIMULACAO_NAO_ENCONTRADA",
                             "Simulação " + req.simulationId() + " não encontrada"));
@@ -115,13 +121,21 @@ public class PortalCreditService {
                 throw new BusinessRuleException("SIMULACAO_JA_UTILIZADA",
                         "A simulação " + sim.getId() + " já virou o pedido " + sim.getCreditRequestId());
             }
-            if (sim.getValidade().isBefore(LocalDate.now(clock))) {
+            LocalDate today = LocalDate.now(clock);
+            if (sim.getValidade().isBefore(today)) {
                 throw new BusinessRuleException("SIMULACAO_EXPIRADA",
                         "A simulação " + sim.getId() + " venceu em " + sim.getValidade());
             }
+            if (antecipacao(sim.getProduto())) {
+                travados = receivables.findByCustomerIdForUpdate(customerId);
+            }
+            revalidate(customerId, sim, today);
         } else {
             if (req.produto() == null || req.valor() == null || req.prazoMeses() == null) {
                 throw new ValidationException("Informe simulation_id ou produto, valor e prazo_meses");
+            }
+            if (req.produto() == CreditProduct.ANTECIPACAO_RECEBIVEIS) {
+                travados = receivables.findByCustomerIdForUpdate(customerId);
             }
             sim = createSimulation(customerId, req.produto(), req.valor(), req.prazoMeses(), null);
         }
@@ -142,8 +156,72 @@ public class PortalCreditService {
                 sim.getPrazoMeses(), sim.getScore(), sim.getFaixaRisco(), status, motivo, taxaFracao));
         sim.setCreditRequestId(resp.id());
         simulations.save(sim);
+        if (status == CreditStatus.APROVADO && antecipacao(sim.getProduto())) {
+            antecipar(sim, travados);
+        }
         metrics.portalRequest(sim.getProduto());
         return resp;
+    }
+
+    private static boolean antecipacao(String produto) {
+        return CreditProduct.ANTECIPACAO_RECEBIVEIS.name().equals(produto);
+    }
+
+    /**
+     * Simulação pré-aprovada feita antes de outro pedido aprovado (ou de recebíveis antecipados): o limite é
+     * recalculado agora e, se não cobre mais o valor, o pedido vai para análise.
+     */
+    private void revalidate(Long customerId, CreditSimulation sim, LocalDate today) {
+        if (Aprovacao.valueOf(sim.getAprovacao()) != Aprovacao.PRE_APROVADO) {
+            return;
+        }
+        BigDecimal limite = limitFor(customerId, CreditProduct.valueOf(sim.getProduto()), selectedIds(sim), today);
+        if (sim.getValor().compareTo(limite) > 0) {
+            sim.setAprovacao(Aprovacao.ANALISE.name());
+            sim.setLimite(limite);
+        }
+    }
+
+    /**
+     * Marca ANTECIPADO os recebíveis (só PREVISTO) usados na antecipação aprovada: os selecionados na simulação
+     * ou, sem seleção, os de vencimento mais próximo até o limite deles cobrir o valor.
+     */
+    private void antecipar(CreditSimulation sim, List<Receivable> travados) {
+        List<Receivable> previstos = travados.stream().filter(r -> r.getStatus() == ReceivableStatus.PREVISTO)
+                .toList();
+        List<Long> ids = selectedIds(sim);
+        List<Receivable> usados = new ArrayList<>();
+        if (ids != null) {
+            previstos.stream().filter(r -> ids.contains(r.getId())).forEach(usados::add);
+        } else {
+            BigDecimal coberto = BigDecimal.ZERO;
+            for (Receivable r : previstos) {
+                if (coberto.compareTo(sim.getValor()) >= 0) {
+                    break;
+                }
+                usados.add(r);
+                coberto = coberto.add(r.getValorLiquido().multiply(CreditPricing.PCT_ANTECIPACAO));
+            }
+        }
+        usados.forEach(r -> r.setStatus(ReceivableStatus.ANTECIPADO));
+        receivables.saveAll(usados);
+    }
+
+    private static List<Long> selectedIds(CreditSimulation sim) {
+        return sim.getReceivableIds() == null ? null
+                : Arrays.stream(sim.getReceivableIds().split(",")).map(Long::valueOf).toList();
+    }
+
+    /**
+     * Limite ainda disponível: o calculado menos o já aprovado no mesmo produto. Na antecipação o aprovado já
+     * sai do cálculo (os recebíveis usados ficam ANTECIPADO).
+     */
+    private BigDecimal disponivel(Long customerId, CreditProduct produto, BigDecimal limite) {
+        if (produto == CreditProduct.ANTECIPACAO_RECEBIVEIS) {
+            return limite;
+        }
+        BigDecimal aprovado = simulations.sumValorByRequestStatus(customerId, produto.name(), CreditStatus.APROVADO);
+        return aprovado == null ? limite : CreditPricing.money(limite.subtract(aprovado).max(BigDecimal.ZERO));
     }
 
     public List<CreditResponseDto> requests(Long customerId) {
@@ -214,10 +292,10 @@ public class PortalCreditService {
             case ANTECIPACAO_RECEBIVEIS -> CreditPricing.limite(produto,
                     sumNet(selecionados == null ? previstos(customerId) : selected(customerId, selecionados)),
                     BigDecimal.ZERO, BigDecimal.ZERO);
-            case FINANCIAMENTO_ESTOQUE -> CreditPricing.limite(produto, BigDecimal.ZERO,
-                    inventoryValue(customerId), BigDecimal.ZERO);
-            case CAPITAL_DE_GIRO, ALAVANCAGEM, CONSOLIDACAO_DIVIDAS -> CreditPricing.limite(produto,
-                    BigDecimal.ZERO, BigDecimal.ZERO, revenue30d(customerId, today));
+            case FINANCIAMENTO_ESTOQUE -> disponivel(customerId, produto, CreditPricing.limite(produto,
+                    BigDecimal.ZERO, inventoryValue(customerId), BigDecimal.ZERO));
+            case CAPITAL_DE_GIRO, ALAVANCAGEM, CONSOLIDACAO_DIVIDAS -> disponivel(customerId, produto,
+                    CreditPricing.limite(produto, BigDecimal.ZERO, BigDecimal.ZERO, revenue30d(customerId, today)));
         };
     }
 

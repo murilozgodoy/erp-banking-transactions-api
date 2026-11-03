@@ -49,7 +49,7 @@ class TransactionServiceTest {
 
     @Test
     void creditIncreasesBalance() {
-        when(accountRepo.findById(10L)).thenReturn(Optional.of(account));
+        when(accountRepo.findByIdForUpdate(10L)).thenReturn(Optional.of(account));
         when(txRepo.save(any(Transaction.class))).thenAnswer(inv -> inv.getArgument(0));
 
         var result = service.register(
@@ -63,7 +63,7 @@ class TransactionServiceTest {
 
     @Test
     void debitDecreasesBalance() {
-        when(accountRepo.findById(10L)).thenReturn(Optional.of(account));
+        when(accountRepo.findByIdForUpdate(10L)).thenReturn(Optional.of(account));
         when(txRepo.save(any(Transaction.class))).thenAnswer(inv -> inv.getArgument(0));
 
         var result = service.register(
@@ -74,7 +74,7 @@ class TransactionServiceTest {
 
     @Test
     void debitFailsWithInsufficientFunds() {
-        when(accountRepo.findById(10L)).thenReturn(Optional.of(account));
+        when(accountRepo.findByIdForUpdate(10L)).thenReturn(Optional.of(account));
         assertThatThrownBy(() -> service.register(
                 new TransactionRequest(10L, TransactionType.DEBIT, new BigDecimal("999"))))
                 .isInstanceOf(InsufficientFundsException.class);
@@ -83,7 +83,7 @@ class TransactionServiceTest {
     @Test
     void failsWhenAccountNotActive() {
         account.setStatus(AccountStatus.BLOCKED);
-        when(accountRepo.findById(10L)).thenReturn(Optional.of(account));
+        when(accountRepo.findByIdForUpdate(10L)).thenReturn(Optional.of(account));
         assertThatThrownBy(() -> service.register(
                 new TransactionRequest(10L, TransactionType.CREDIT, new BigDecimal("10"))))
                 .isInstanceOf(AccountBlockedException.class);
@@ -91,7 +91,7 @@ class TransactionServiceTest {
 
     @Test
     void failsWhenAccountNotFound() {
-        when(accountRepo.findById(99L)).thenReturn(Optional.empty());
+        when(accountRepo.findByIdForUpdate(99L)).thenReturn(Optional.empty());
         assertThatThrownBy(() -> service.register(
                 new TransactionRequest(99L, TransactionType.CREDIT, new BigDecimal("10"))))
                 .isInstanceOf(AccountNotFoundException.class);

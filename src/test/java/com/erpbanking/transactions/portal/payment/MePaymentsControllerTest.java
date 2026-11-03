@@ -147,7 +147,7 @@ class MePaymentsControllerTest {
     @Test
     void semContaAbreUmaEFalhaPorSaldo() throws Exception {
         postPayment("{\"tipo\":\"PIX\",\"valor\":10,\"destinatario\":\"Maria\",\"agendado_para\":\""
-                + LocalDate.now().minusDays(1) + "\"}")
+                + LocalDate.now(PortalPaymentService.ZONE) + "\"}")
                 .andExpect(status().isUnprocessableEntity())
                 .andExpect(jsonPath("$.faltam").value(10));
         assertThat(accounts.findByCustomerIdOrderByIdDesc(customerId)).hasSize(1);
@@ -169,6 +169,36 @@ class MePaymentsControllerTest {
         postPayment("{\"tipo\":\"BOLETO\",\"valor\":150,\"destinatario\":\"X\",\"payable_id\":" + paga.getId() + "}")
                 .andExpect(status().isUnprocessableEntity())
                 .andExpect(jsonPath("$.error").value("CONTA_JA_PAGA"));
+    }
+
+    @Test
+    void contaJaAgendadaDevolve422() throws Exception {
+        account("1000.00");
+        Payable agendada = payable(customerId, PayableStatus.AGENDADO);
+        postPayment("{\"tipo\":\"BOLETO\",\"valor\":150,\"destinatario\":\"X\",\"payable_id\":" + agendada.getId() + "}")
+                .andExpect(status().isUnprocessableEntity())
+                .andExpect(jsonPath("$.error").value("CONTA_JA_AGENDADA"));
+    }
+
+    @Test
+    void valorDiferenteDaContaAPagarDevolve422() throws Exception {
+        Account acc = account("1000.00");
+        Payable payable = payable(customerId, PayableStatus.ABERTO);
+        postPayment("{\"tipo\":\"BOLETO\",\"valor\":1.00,\"destinatario\":\"X\",\"payable_id\":" + payable.getId() + "}")
+                .andExpect(status().isUnprocessableEntity())
+                .andExpect(jsonPath("$.error").value("VALOR_DIVERGENTE"))
+                .andExpect(jsonPath("$.message").exists());
+        assertThat(payables.findById(payable.getId()).orElseThrow().getStatus()).isEqualTo(PayableStatus.ABERTO);
+        assertThat(accounts.findById(acc.getId()).orElseThrow().getSaldo()).isEqualByComparingTo("1000.00");
+    }
+
+    @Test
+    void agendamentoNoPassadoDevolve400() throws Exception {
+        account("1000.00");
+        postPayment("{\"tipo\":\"PIX\",\"valor\":10,\"destinatario\":\"Maria\",\"agendado_para\":\""
+                + LocalDate.now(PortalPaymentService.ZONE).minusDays(1) + "\"}")
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.error").value("validation_failed"));
     }
 
     @Test

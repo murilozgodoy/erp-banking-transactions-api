@@ -137,6 +137,17 @@ class MeReadControllerTest {
     }
 
     @Test
+    void periodoDeVendasLimitadoA400Dias() throws Exception {
+        mockMvc.perform(me("/me/sales").param("from", "2025-01-01").param("to", "2026-02-05"))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.error").value("PARAMETRO_INVALIDO"))
+                .andExpect(jsonPath("$.mensagem").value("Período máximo de 400 dias"));
+        mockMvc.perform(me("/me/sales").param("from", "2025-01-01").param("to", "2026-02-04")
+                        .param("group_by", "month"))
+                .andExpect(status().isOk());
+    }
+
+    @Test
     void onboardingPendenteVira409() throws Exception {
         when(customers.requireCustomerId()).thenThrow(new OnboardingPendingException("EM_ANALISE"));
         mockMvc.perform(me("/me/overview"))
