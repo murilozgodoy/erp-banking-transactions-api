@@ -1,4 +1,4 @@
-# ERP Banking - Transactions API
+# ErpIa - Transactions API
 
 Serviço responsável por contas, transações e contratos de crédito. Consome a Credit Score API antes de aprovar operações de crédito.
 Documentação central do projeto em [erp-banking-front/docs](https://github.com/murilozgodoy/erp-banking-front/tree/main/docs).
