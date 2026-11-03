@@ -4,6 +4,7 @@ import java.math.BigDecimal;
 import java.util.ArrayList;
 import java.util.List;
 
+import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -13,6 +14,7 @@ import com.erpbanking.transactions.domain.Transaction;
 import com.erpbanking.transactions.domain.TransactionType;
 import com.erpbanking.transactions.dto.TransactionRequest;
 import com.erpbanking.transactions.dto.TransactionResponse;
+import com.erpbanking.transactions.events.TransactionCreatedEvent;
 import com.erpbanking.transactions.exception.ApiExceptions.AccountBlockedException;
 import com.erpbanking.transactions.exception.ApiExceptions.AccountNotFoundException;
 import com.erpbanking.transactions.exception.ApiExceptions.InsufficientFundsException;
@@ -24,11 +26,14 @@ public class TransactionService {
 
     private final AccountRepository accountRepository;
     private final TransactionRepository transactionRepository;
+    private final ApplicationEventPublisher events;
 
     public TransactionService(AccountRepository accountRepository,
-                              TransactionRepository transactionRepository) {
+                              TransactionRepository transactionRepository,
+                              ApplicationEventPublisher events) {
         this.accountRepository = accountRepository;
         this.transactionRepository = transactionRepository;
+        this.events = events;
     }
 
     @Transactional
@@ -53,6 +58,9 @@ public class TransactionService {
         account.setSaldo(novoSaldo);
         accountRepository.save(account);
         Transaction saved = transactionRepository.save(new Transaction(account.getId(), req.tipo(), req.valor()));
+        // Publicado após o commit (ver DomainEventListener).
+        events.publishEvent(new TransactionCreatedEvent(saved.getId(), account.getId(), account.getCustomerId(),
+                saved.getTipo(), saved.getValor(), novoSaldo));
         return new TransactionResult(saved, novoSaldo);
     }
 

@@ -17,12 +17,14 @@ import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.InjectMocks;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
+import org.springframework.context.ApplicationEventPublisher;
 
 import com.erpbanking.transactions.domain.Account;
 import com.erpbanking.transactions.domain.AccountStatus;
 import com.erpbanking.transactions.domain.Transaction;
 import com.erpbanking.transactions.domain.TransactionType;
 import com.erpbanking.transactions.dto.TransactionRequest;
+import com.erpbanking.transactions.events.TransactionCreatedEvent;
 import com.erpbanking.transactions.exception.ApiExceptions.AccountBlockedException;
 import com.erpbanking.transactions.exception.ApiExceptions.AccountNotFoundException;
 import com.erpbanking.transactions.exception.ApiExceptions.InsufficientFundsException;
@@ -34,6 +36,7 @@ class TransactionServiceTest {
 
     @Mock AccountRepository accountRepo;
     @Mock TransactionRepository txRepo;
+    @Mock ApplicationEventPublisher events;
     @InjectMocks TransactionService service;
 
     private Account account;
@@ -54,6 +57,8 @@ class TransactionServiceTest {
 
         assertThat(result.saldoAtual()).isEqualByComparingTo("150.00");
         verify(accountRepo, times(1)).save(account);
+        verify(events).publishEvent(new TransactionCreatedEvent(null, 10L, 1L, TransactionType.CREDIT,
+                new BigDecimal("50.00"), new BigDecimal("150.00")));
     }
 
     @Test

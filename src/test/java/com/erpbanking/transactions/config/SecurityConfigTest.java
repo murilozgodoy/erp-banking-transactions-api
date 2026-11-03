@@ -6,6 +6,7 @@ import java.util.Map;
 
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.boot.test.autoconfigure.actuate.observability.AutoConfigureObservability;
 import org.springframework.boot.test.autoconfigure.web.servlet.AutoConfigureMockMvc;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.boot.test.mock.mockito.MockBean;
@@ -24,6 +25,7 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 
 @SpringBootTest
 @AutoConfigureMockMvc
+@AutoConfigureObservability
 @ActiveProfiles("test")
 class SecurityConfigTest {
     @Autowired MockMvc mvc;
@@ -32,13 +34,27 @@ class SecurityConfigTest {
     @Test
     void publicHealthAndProtectedRoutes() throws Exception {
         mvc.perform(get("/health")).andExpect(status().isOk());
-        for (String path : new String[]{"/accounts/1", "/credits/1", "/transactions", "/actuator/health"}) {
+        mvc.perform(get("/actuator/health")).andExpect(status().isOk());
+        for (String path : new String[]{"/accounts/1", "/credits/1", "/transactions"}) {
             mvc.perform(get(path)).andExpect(status().isUnauthorized());
         }
         mvc.perform(post("/accounts").contentType("application/json").content("{}"))
                 .andExpect(status().isUnauthorized());
         mvc.perform(get("/accounts/999999").with(jwt().authorities(new SimpleGrantedAuthority("read:accounts"))))
                 .andExpect(status().isNotFound());
+    }
+
+    @Test
+    void prometheusEndpointIsPublicAndExposesBusinessMetrics() throws Exception {
+        mvc.perform(get("/health")).andExpect(status().isOk());
+        mvc.perform(get("/actuator/prometheus"))
+                .andExpect(status().isOk())
+                .andExpect(content().string(org.hamcrest.Matchers.containsString(
+                        "credit_decisions_total{application=\"transactions-api\",status=\"APROVADO\"")))
+                .andExpect(content().string(org.hamcrest.Matchers.containsString(
+                        "transactions_created_total{application=\"transactions-api\",tipo=\"CREDIT\"")))
+                .andExpect(content().string(org.hamcrest.Matchers.containsString(
+                        "http_server_requests_seconds_bucket")));
     }
 
     @Test

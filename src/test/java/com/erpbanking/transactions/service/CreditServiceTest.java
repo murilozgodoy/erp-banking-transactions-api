@@ -18,6 +18,7 @@ import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.InjectMocks;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
+import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.data.domain.Sort;
 
 import com.erpbanking.transactions.domain.Contract;
@@ -25,6 +26,7 @@ import com.erpbanking.transactions.domain.CreditRequest;
 import com.erpbanking.transactions.domain.CreditStatus;
 import com.erpbanking.transactions.dto.CreditRequestDto;
 import com.erpbanking.transactions.dto.ScoreResponse;
+import com.erpbanking.transactions.events.CreditDecidedEvent;
 import com.erpbanking.transactions.exception.ApiExceptions.CreditRequestNotFoundException;
 import com.erpbanking.transactions.repository.ContractRepository;
 import com.erpbanking.transactions.repository.CreditRequestRepository;
@@ -36,6 +38,7 @@ class CreditServiceTest {
     @Mock CreditRequestRepository crRepo;
     @Mock ContractRepository contractRepo;
     @Mock CreditScoreClient scoreClient;
+    @Mock ApplicationEventPublisher events;
     @InjectMocks CreditService service;
 
     @Test
@@ -52,6 +55,8 @@ class CreditServiceTest {
         assertThat(resp.status()).isEqualTo(CreditStatus.NEGADO);
         assertThat(resp.motivo()).contains("sem score");
         verify(contractRepo, never()).save(any());
+        verify(events).publishEvent(new CreditDecidedEvent(1L, 1L, new BigDecimal("5000"), 12, null, null,
+                CreditStatus.NEGADO, "Cliente sem score de crédito registrado", BigDecimal.ZERO));
     }
 
     @Test
@@ -70,6 +75,8 @@ class CreditServiceTest {
         assertThat(resp.valorAprovado()).isEqualByComparingTo("10000");
         assertThat(resp.taxaJuros()).isEqualByComparingTo("0.0299");
         verify(contractRepo, times(1)).save(any(Contract.class));
+        verify(events).publishEvent(new CreditDecidedEvent(2L, 1L, new BigDecimal("10000"), 24, 820.0, "BAIXO",
+                CreditStatus.APROVADO, "Aprovação automática — risco baixo", new BigDecimal("0.0299")));
     }
 
     @Test
