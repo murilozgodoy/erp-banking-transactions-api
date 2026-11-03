@@ -15,8 +15,10 @@ import java.util.concurrent.TimeUnit;
 
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.boot.test.autoconfigure.jdbc.AutoConfigureTestDatabase;
 import org.springframework.boot.test.autoconfigure.orm.jpa.DataJpaTest;
 import org.springframework.context.annotation.Import;
+import org.springframework.test.context.TestPropertySource;
 import org.springframework.transaction.annotation.Propagation;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -29,8 +31,22 @@ import com.erpbanking.transactions.repository.SaleRepository;
 import com.erpbanking.transactions.repository.TransactionRepository;
 import com.erpbanking.transactions.service.AccountService;
 
-/** Grava a massa de verdade no H2 (mapeamento JPA, ids das vendas nos recebíveis e idempotência). */
+/**
+ * Grava a massa de verdade no H2 (mapeamento JPA, ids das vendas nos recebíveis e idempotência).
+ *
+ * <p>Usa um H2 próprio com {@code LOCK_TIMEOUT=30000}: o banco embutido padrão do {@code @DataJpaTest}
+ * espera só ~2 s por um lock de linha, e no teste paralelo as entregas que perdem a corrida ficam
+ * paradas no {@code SELECT ... FOR UPDATE} da conta enquanto a vencedora grava a massa inteira numa
+ * transação. Sob carga isso passava de 2 s e estourava "Timeout trying to lock table ACCOUNTS".
+ */
 @DataJpaTest
+@AutoConfigureTestDatabase(replace = AutoConfigureTestDatabase.Replace.NONE)
+@TestPropertySource(properties = {
+        "spring.datasource.url=jdbc:h2:mem:portal-seeder-jpa;DB_CLOSE_DELAY=-1;DB_CLOSE_ON_EXIT=false;LOCK_TIMEOUT=30000",
+        "spring.datasource.driver-class-name=org.h2.Driver",
+        "spring.datasource.username=sa",
+        "spring.datasource.password="
+})
 @Import({PortalSeeder.class, AccountService.class})
 class PortalSeederJpaTest {
 
