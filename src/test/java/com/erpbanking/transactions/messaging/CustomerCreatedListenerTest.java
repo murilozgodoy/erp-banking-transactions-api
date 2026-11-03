@@ -51,6 +51,18 @@ class CustomerCreatedListenerTest {
         assertThat(consumed("ok")).isZero();
         assertThat(consumed("duplicate")).isZero();
         assertThat(consumed("invalid")).isZero();
+        assertThat(consumed("error")).isZero();
+    }
+
+    @Test
+    void failureToOpenAccountCountsErrorAndRethrows() {
+        when(accountService.openForNewCustomer(42L)).thenThrow(new IllegalStateException("db fora"));
+
+        assertThatThrownBy(() -> listener.onCustomerCreated(Map.of("customer_id", 42)))
+                .isInstanceOf(IllegalStateException.class);
+
+        assertThat(consumed("error")).isEqualTo(1.0);
+        assertThat(consumed("ok")).isZero();
     }
 
     @Test

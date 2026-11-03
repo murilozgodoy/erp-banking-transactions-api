@@ -1,19 +1,22 @@
 package com.erpbanking.transactions.messaging;
 
 import java.util.Map;
+import java.util.Optional;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.amqp.AmqpRejectAndDontRequeueException;
 import org.springframework.amqp.rabbit.annotation.RabbitListener;
 
+import com.erpbanking.transactions.domain.Account;
 import com.erpbanking.transactions.metrics.BusinessMetrics;
 import com.erpbanking.transactions.service.AccountService;
 
 /**
  * Consome {@code customer.created} (Onboarding) na fila {@code transactions.customer-created} e abre a conta
  * corrente do cliente com saldo zero. Idempotente: a mesma mensagem reentregue não abre uma segunda conta.
- * Payload inválido é descartado sem requeue, para não entrar em loop.
+ * Payload inválido é descartado sem requeue, para não entrar em loop. Erro ao abrir a conta conta como
+ * {@code result="error"} e a exceção segue para o container (mesma política de retry de antes).
  */
 public class CustomerCreatedListener {
 
@@ -28,7 +31,7 @@ public class CustomerCreatedListener {
     public CustomerCreatedListener(AccountService accountService, BusinessMetrics metrics) {
         this.accountService = accountService;
         this.metrics = metrics;
-        metrics.initConsumed(ROUTING_KEY, "ok", "duplicate", "invalid");
+        metrics.initConsumed(ROUTING_KEY, "ok", "duplicate", "invalid", "error");
     }
 
     @RabbitListener(queues = QUEUE)
@@ -39,7 +42,15 @@ public class CustomerCreatedListener {
             metrics.eventConsumed(ROUTING_KEY, "invalid");
             throw new AmqpRejectAndDontRequeueException("customer_id ausente ou invalido");
         }
-        accountService.openForNewCustomer(customerId).ifPresentOrElse(
+        Optional<Account> opened;
+        try {
+            opened = accountService.openForNewCustomer(customerId);
+        } catch (RuntimeException e) {
+            log.error("Falha ao abrir conta para o cliente {} a partir de customer.created", customerId, e);
+            metrics.eventConsumed(ROUTING_KEY, "error");
+            throw e;
+        }
+        opened.ifPresentOrElse(
                 account -> {
                     log.info("Conta {} aberta automaticamente para o cliente {}", account.getId(), customerId);
                     metrics.eventConsumed(ROUTING_KEY, "ok");
