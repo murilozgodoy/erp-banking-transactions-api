@@ -35,6 +35,7 @@ public class SecurityConfig {
                 .csrf(csrf -> csrf.disable())
                 .sessionManagement(session -> session.sessionCreationPolicy(SessionCreationPolicy.STATELESS))
                 .authorizeHttpRequests(auth -> auth.requestMatchers("/health", "/actuator/**").permitAll()
+                        .requestMatchers(OpenApiConfig.PUBLIC_PATHS).permitAll()
                         .requestMatchers(HttpMethod.GET, "/accounts/**").hasAuthority(READ_ACCOUNTS)
                         .requestMatchers(HttpMethod.POST, "/accounts", "/transactions").hasAuthority(WRITE_ACCOUNTS)
                         .requestMatchers(HttpMethod.GET, "/credits/**").hasAuthority(READ_CREDITS)
