@@ -2,9 +2,11 @@ package com.erpbanking.transactions.service;
 
 import java.math.BigDecimal;
 import java.util.List;
+import java.util.Optional;
 
 import org.springframework.data.domain.Sort;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
 
 import com.erpbanking.transactions.domain.Account;
 import com.erpbanking.transactions.dto.AccountCreateRequest;
@@ -28,6 +30,18 @@ public class AccountService {
     public Account get(Long id) {
         return accountRepository.findById(id)
                 .orElseThrow(() -> new AccountNotFoundException("Conta " + id + " não encontrada"));
+    }
+
+    /**
+     * Abertura automática (evento {@code customer.created}): idempotente. Se o cliente já tem conta,
+     * não faz nada e retorna vazio.
+     */
+    @Transactional
+    public Optional<Account> openForNewCustomer(Long customerId) {
+        if (!accountRepository.findByCustomerIdOrderByIdDesc(customerId).isEmpty()) {
+            return Optional.empty();
+        }
+        return Optional.of(accountRepository.save(new Account(customerId, BigDecimal.ZERO)));
     }
 
     /** Contas mais recentes primeiro; filtra pelo cliente quando informado. */
