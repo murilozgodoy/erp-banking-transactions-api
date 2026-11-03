@@ -9,6 +9,8 @@ import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Conditional;
 import org.springframework.context.annotation.Configuration;
 
+import com.erpbanking.transactions.events.CreditDecidedEvent;
+import com.erpbanking.transactions.events.TransactionCreatedEvent;
 import com.erpbanking.transactions.metrics.BusinessMetrics;
 import com.fasterxml.jackson.databind.ObjectMapper;
 
@@ -31,6 +33,7 @@ public class MessagingConfig {
     @Conditional(MessagingEnabledCondition.class)
     EventPublisher rabbitEventPublisher(RabbitTemplate rabbitTemplate, BusinessMetrics metrics,
                                         @Value("${messaging.exchange:erp.events}") String exchange) {
+        metrics.initPublished(CreditDecidedEvent.ROUTING_KEY, TransactionCreatedEvent.ROUTING_KEY);
         return new RabbitEventPublisher(rabbitTemplate, exchange, metrics);
     }
 

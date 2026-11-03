@@ -43,21 +43,43 @@ public class BusinessMetrics {
     }
 
     public void eventPublished(String routingKey, String result) {
-        Counter.builder(EVENTS_PUBLISHED)
-                .description("Eventos publicados no RabbitMQ (exchange erp.events)")
-                .tag("routing_key", routingKey)
-                .tag("result", result)
-                .register(registry)
-                .increment();
+        published(routingKey, result).increment();
     }
 
     public void eventConsumed(String routingKey, String result) {
-        Counter.builder(EVENTS_CONSUMED)
+        consumed(routingKey, result).increment();
+    }
+
+    /** Cria as séries {@code events_published_total} com zero (dashboards mostram 0 em vez de "No data"). */
+    public void initPublished(String... routingKeys) {
+        for (String routingKey : routingKeys) {
+            for (String result : new String[]{"ok", "error"}) {
+                published(routingKey, result);
+            }
+        }
+    }
+
+    /** Cria as séries {@code events_consumed_total} com zero. */
+    public void initConsumed(String routingKey, String... results) {
+        for (String result : results) {
+            consumed(routingKey, result);
+        }
+    }
+
+    private Counter published(String routingKey, String result) {
+        return Counter.builder(EVENTS_PUBLISHED)
+                .description("Eventos publicados no RabbitMQ (exchange erp.events)")
+                .tag("routing_key", routingKey)
+                .tag("result", result)
+                .register(registry);
+    }
+
+    private Counter consumed(String routingKey, String result) {
+        return Counter.builder(EVENTS_CONSUMED)
                 .description("Eventos consumidos do RabbitMQ")
                 .tag("routing_key", routingKey)
                 .tag("result", result)
-                .register(registry)
-                .increment();
+                .register(registry);
     }
 
     private Counter creditDecisions(CreditStatus status) {

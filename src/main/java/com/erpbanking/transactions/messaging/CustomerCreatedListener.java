@@ -28,6 +28,7 @@ public class CustomerCreatedListener {
     public CustomerCreatedListener(AccountService accountService, BusinessMetrics metrics) {
         this.accountService = accountService;
         this.metrics = metrics;
+        metrics.initConsumed(ROUTING_KEY, "ok", "duplicate", "invalid");
     }
 
     @RabbitListener(queues = QUEUE)
