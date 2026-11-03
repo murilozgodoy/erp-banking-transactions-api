@@ -32,6 +32,16 @@ spring:
     # Ex.: amqp://erp:erp@rabbitmq:5672/ — vazio desliga a mensageria (no-op).
     addresses: ${RABBITMQ_URL:}
     connection-timeout: 2s
+    listener:
+      simple:
+        # Erro ao processar (ex.: banco fora): 3 tentativas com backoff (1s, 2s) e depois descarta,
+        # em vez de requeue infinito em loop quente. Payload inválido é descartado na hora.
+        default-requeue-rejected: false
+        retry:
+          enabled: true
+          max-attempts: 3
+          initial-interval: 1s
+          multiplier: 2
 
 # MESSAGING_ENABLED=true|false força ligar/desligar; vazio = ligado se RABBITMQ_URL estiver definida.
 messaging:
