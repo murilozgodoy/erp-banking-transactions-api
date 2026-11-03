@@ -28,9 +28,9 @@ public class OpenApiConfig {
     OpenAPI transactionsOpenApi() {
         return new OpenAPI()
                 .info(new Info()
-                        .title("ERP Banking - Transactions API")
+                        .title("ErpIa - Transactions API")
                         .version("1.0.0")
-                        .description("Contas, transações e solicitações de crédito"))
+                        .description("ErpIa: contas, transações, crédito e o portal do cliente (rotas /me)"))
                 .components(new Components().addSecuritySchemes(BEARER, new SecurityScheme()
                         .type(SecurityScheme.Type.HTTP)
                         .scheme("bearer")
