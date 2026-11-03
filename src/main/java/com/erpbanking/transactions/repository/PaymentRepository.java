@@ -19,6 +19,11 @@ public interface PaymentRepository extends JpaRepository<Payment, Long> {
 
     boolean existsByCustomerId(Long customerId);
 
+    List<Payment> findByCustomerIdAndStatusOrderByIdDesc(Long customerId, PaymentStatus status);
+
+    /** Há pagamento no status para a conta a pagar (chamado com a conta a pagar já travada). */
+    boolean existsByPayableIdAndStatus(Long payableId, PaymentStatus status);
+
     /** Ids dos pagamentos no status informado com data até {@code ate} (inclusive), mais antigos primeiro. */
     @Query("select p.id from Payment p where p.status = :status and p.agendadoPara <= :ate "
             + "order by p.agendadoPara, p.id")

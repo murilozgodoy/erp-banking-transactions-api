@@ -26,8 +26,10 @@ public class PortalMetrics {
     public static final String EFETIVADO = "EFETIVADO";
     public static final String AGENDADO = "AGENDADO";
     public static final String RECUSADO = "RECUSADO";
+    public static final String PENDENTE_APROVACAO = "PENDENTE_APROVACAO";
+    public static final String REJEITADO = "REJEITADO";
 
-    static final String[] PAYMENT_STATUSES = {EFETIVADO, AGENDADO, RECUSADO};
+    static final String[] PAYMENT_STATUSES = {EFETIVADO, AGENDADO, RECUSADO, PENDENTE_APROVACAO, REJEITADO};
     static final String[] PRODUTOS = {"ANTECIPACAO_RECEBIVEIS", "CAPITAL_DE_GIRO", "ALAVANCAGEM",
             "FINANCIAMENTO_ESTOQUE", "CONSOLIDACAO_DIVIDAS"};
     static final String[] APROVACOES = {"PRE_APROVADO", "ANALISE", "NEGADO"};
@@ -50,7 +52,10 @@ public class PortalMetrics {
         }
     }
 
-    /** Pagamento efetivado, agendado ou recusado; o valor só soma nos efetivados. */
+    /**
+     * Pagamento efetivado, agendado, recusado (saldo), pendente de aprovação (acima do limite) ou rejeitado; o valor
+     * só soma nos efetivados.
+     */
     public void payment(PaymentType tipo, String status, BigDecimal valor) {
         payments(tipo.name(), status).increment();
         if (EFETIVADO.equals(status) && valor != null) {

@@ -36,6 +36,10 @@ class PortalMetricsTest {
                 .andExpect(content().string(containsString(
                         "payments_total{application=\"transactions-api\",status=\"RECUSADO\",tipo=\"PIX\"")))
                 .andExpect(content().string(containsString(
+                        "payments_total{application=\"transactions-api\",status=\"PENDENTE_APROVACAO\",tipo=\"TED\"")))
+                .andExpect(content().string(containsString(
+                        "payments_total{application=\"transactions-api\",status=\"REJEITADO\",tipo=\"BOLETO\"")))
+                .andExpect(content().string(containsString(
                         "payments_amount_brl_total{application=\"transactions-api\",tipo=\"TED\"")))
                 .andExpect(content().string(containsString(
                         "credit_simulations_total{application=\"transactions-api\",aprovacao=\"PRE_APROVADO\","

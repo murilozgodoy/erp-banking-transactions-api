@@ -122,7 +122,8 @@ Membro SUSPENSO (403 `MEMBRO_SUSPENSO` do Onboarding, ou `membro.status` = SUSPE
 | Permissão | Rotas |
 |-----------|-------|
 | `ver_financeiro` | todos os `GET /me/*` (overview, sales, receivables, payables, statement, inventory, pendencias, payments, credit/offers, credit/requests) |
-| `pagar` | `POST /me/payments` |
+| `pagar` | `POST /me/payments` (acima do `limite_pagamento` do membro, fica `PENDENTE_APROVACAO`) |
+| `aprovar_pagamentos` | `GET /me/payments/pending`, `POST /me/payments/{id}/approve` e `/reject` (nunca pelo autor) |
 | `pedir_credito` | `POST /me/credit/simulations`; `POST /me/credit/requests` sem `contratar_credito` cria o pedido `AGUARDANDO_CONTRATACAO` |
 | `contratar_credito` | `POST /me/credit/requests` (decisão na hora) e `POST /me/credit/requests/{id}/confirm` |
 | `gerenciar_estoque` | rotas de estoque que escrevem (nenhuma por enquanto) |
@@ -130,6 +131,21 @@ Membro SUSPENSO (403 `MEMBRO_SUSPENSO` do Onboarding, ou `membro.status` = SUSPE
 
 **Auditoria:** `payments` e `credit_requests` ganham `created_by_sub` e `created_by_nome` (o `membro.nome`; nulos nos
 registros antigos). Saem como `created_by_nome` no `GET /me/payments` e como `createdByNome` no `CreditResponse`.
+Pagamentos aprovados ganham `approved_by_sub`, `approved_by_nome` e `approved_at`; os rejeitados, `rejected_by_sub`,
+`rejected_by_nome`, `rejected_at` e `motivo_rejeicao`. Todos saem em snake_case no `GET /me/payments` e no
+`GET /me/payments/pending` (exceto os `*_sub`).
+
+**Aprovação de pagamentos.** Com `valor > membro.limite_pagamento` (limite nulo = sem limite), `POST /me/payments`
+responde 201 com `status: "PENDENTE_APROVACAO"`: nada é debitado, `saldo_apos` é o saldo atual e a conta a pagar
+continua como estava. Enquanto houver um pendente para a mesma conta a pagar, um novo pagamento dela responde 422
+`PAGAMENTO_PENDENTE` (a verificação roda com a conta a pagar travada por `SELECT ... FOR UPDATE`, o mesmo lock do
+pagamento normal). Aprovar trava o pagamento, a conta a pagar e a conta corrente e executa como um pagamento normal:
+debita (`SALDO_INSUFICIENTE` 422 mantém o pagamento pendente), marca a conta a pagar `PAGO`, gera a transaction DEBIT
+e as métricas; com `agendado_para` futuro, vira `AGENDADO` e o job executa na data. Rejeitar (`{motivo?}`) deixa
+`REJEITADO` e libera a conta a pagar. Quem pagou não pode aprovar nem rejeitar o próprio pagamento: **403**
+`{"error":"SEM_PERMISSAO","permissao":"aprovar_pagamentos","motivo":"AUTOR"}`. Pagamento de outra empresa ou
+inexistente → 404 `PAGAMENTO_NAO_ENCONTRADO`; fora de `PENDENTE_APROVACAO` → 422 `PAGAMENTO_NAO_PENDENTE`. Quem aprova
+precisa só de `aprovar_pagamentos` (o limite de pagamento dele não se aplica à aprovação).
 
 | Método | Rota | Descrição |
 |--------|------|-----------|
@@ -141,7 +157,10 @@ registros antigos). Saem como `created_by_nome` no `GET /me/payments` e como `cr
 | GET | `/me/inventory` | Itens com cobertura em dias, valor total, valor parado (giro > 90 dias) e itens abaixo do mínimo |
 | GET | `/me/pendencias` | Contas atrasadas, vencendo hoje, saldo insuficiente, propostas em revisão e estoque baixo ou parado, com ação sugerida (e crédito, quando cabe) |
 | POST | `/me/payments` | PIX, boleto ou TED: debita na hora (422 `SALDO_INSUFICIENTE` com `faltam`) ou agenda (`agendado_para` futuro; no passado é 400), e devolve o comprovante. Com `payable_id`, o valor tem de ser o da conta (422 `VALOR_DIVERGENTE`) e ela não pode estar paga ou agendada (422 `CONTA_JA_PAGA` / `CONTA_JA_AGENDADA`) |
-| GET | `/me/payments` | Histórico de pagamentos |
+| GET | `/me/payments` | Histórico de pagamentos (com autoria, aprovação e rejeição) |
+| GET | `/me/payments/pending` | Pagamentos `PENDENTE_APROVACAO` da empresa, com `created_by_nome` |
+| POST | `/me/payments/{id}/approve` | Aprova e executa o pendente (200 com o mesmo corpo do `POST /me/payments`: `EFETIVADO` ou `AGENDADO`) |
+| POST | `/me/payments/{id}/reject` | `{motivo?}`: rejeita o pendente (200 com o item do histórico, `status: "REJEITADO"`) |
 | GET | `/me/credit/offers` | Limite, taxa a partir de e prazo máximo por produto |
 | POST | `/me/credit/simulations` | Simulação Price com IOF e CET; fica salva por 7 dias |
 | POST | `/me/credit/requests` | `{simulation_id}` ou `{produto, valor, prazo_meses}`: pedido pelo fluxo atual (contrato e `credit.decided`). Quem só tem `pedir_credito` recebe o pedido com `status: "AGUARDANDO_CONTRATACAO"`, sem decisão, contrato nem `credit.decided` |
@@ -196,7 +215,7 @@ continuam exigindo o Bearer token (botão **Authorize**). Atrás do API Gateway 
 | `events_published_total` | `routing_key`, `result` = ok, error | publicação no RabbitMQ |
 | `events_consumed_total` | `routing_key`, `result` = ok, duplicate, invalid, error | consumo de `customer.created` e `customer.onboarding_submitted` |
 | `seeder_runs_total` | `result` = ok, skipped, error | seeder do portal (skipped = cliente já tinha dados) |
-| `payments_total` | `tipo` = PIX, BOLETO, TED; `status` = EFETIVADO, AGENDADO, RECUSADO | pagamento pelo portal (RECUSADO = saldo insuficiente) |
+| `payments_total` | `tipo` = PIX, BOLETO, TED; `status` = EFETIVADO, AGENDADO, RECUSADO, PENDENTE_APROVACAO, REJEITADO | pagamento pelo portal (RECUSADO = saldo insuficiente; PENDENTE_APROVACAO = acima do limite do membro; REJEITADO = pendente rejeitado). Um pendente aprovado conta de novo como EFETIVADO ou AGENDADO |
 | `payments_amount_brl_total` | `tipo` | valor dos pagamentos efetivados |
 | `credit_simulations_total` | `produto`, `aprovacao` = PRE_APROVADO, ANALISE, NEGADO | simulação no portal |
 | `credit_portal_requests_total` | `produto` | pedido de crédito pelo portal |

@@ -24,6 +24,8 @@ import com.erpbanking.transactions.domain.PaymentStatus;
 import com.erpbanking.transactions.domain.TransactionType;
 import com.erpbanking.transactions.dto.TransactionRequest;
 import com.erpbanking.transactions.portal.CurrentCustomer;
+import com.erpbanking.transactions.portal.PermissionDeniedException;
+import com.erpbanking.transactions.portal.Permissoes;
 import com.erpbanking.transactions.portal.PortalExceptions.BusinessRuleException;
 import com.erpbanking.transactions.portal.PortalExceptions.NotFoundException;
 import com.erpbanking.transactions.portal.PortalExceptions.SaldoInsuficienteException;
@@ -53,6 +55,8 @@ import com.erpbanking.transactions.service.TransactionService;
 public class PortalPaymentService {
 
     static final ZoneId ZONE = ZoneId.of("America/Sao_Paulo");
+    /** {@code motivo} do 403 SEM_PERMISSAO quando o autor tenta aprovar ou rejeitar o próprio pagamento. */
+    public static final String MOTIVO_AUTOR = "AUTOR";
 
     private static final Logger log = LoggerFactory.getLogger(PortalPaymentService.class);
 
@@ -112,7 +116,15 @@ public class PortalPaymentService {
         p.setCreatedByNome(who.nome());
 
         BigDecimal saldoApos;
-        if (agendado) {
+        if (who.membro().excedeLimite(req.valor())) {
+            // Acima do limite do membro: fica para aprovação, sem debitar e sem mexer na conta a pagar (que fica
+            // bloqueada para outro pagamento enquanto houver um pendente; ver loadPayable).
+            p.setStatus(PaymentStatus.PENDENTE_APROVACAO);
+            if (agendado) {
+                p.setAgendadoPara(req.agendadoPara());
+            }
+            saldoApos = account.getSaldo();
+        } else if (agendado) {
             p.setStatus(PaymentStatus.AGENDADO);
             p.setAgendadoPara(req.agendadoPara());
             saldoApos = account.getSaldo();
@@ -137,6 +149,95 @@ public class PortalPaymentService {
                 saved.getDescricao(), now, saved.getAgendadoPara(), saved.getAutenticacao(),
                 contaOrigem(account), saved.getCodigoBarras());
         return new PaymentCreated(saved.getId(), saved.getStatus(), saved.getAutenticacao(), saldoApos, comprovante);
+    }
+
+    /** Pagamentos PENDENTE_APROVACAO da empresa, do mais recente para o mais antigo. */
+    public List<PaymentView> pending(Long customerId) {
+        return paymentRepository.findByCustomerIdAndStatusOrderByIdDesc(customerId, PaymentStatus.PENDENTE_APROVACAO)
+                .stream().map(PaymentView::of).toList();
+    }
+
+    /**
+     * Aprova um pagamento PENDENTE_APROVACAO e o executa como um pagamento normal: com {@code agendado_para}
+     * futuro vira AGENDADO; senão debita na hora (422 SALDO_INSUFICIENTE se não houver saldo, e ele continua
+     * pendente). Trava o pagamento, a conta a pagar e a conta corrente, nessa ordem.
+     */
+    @Transactional(noRollbackFor = SaldoInsuficienteException.class)
+    public PaymentCreated approve(CurrentCustomer who, Long paymentId) {
+        Payment p = lockedPending(who, paymentId);
+        LocalDate today = LocalDate.now(clock);
+        Instant now = clock.instant();
+        Payable payable = p.getPayableId() == null ? null
+                : payableRepository.findByIdForUpdate(p.getPayableId()).orElse(null);
+        if (payable != null) {
+            checkPayable(payable);
+        }
+        Account account = lockedAccountOf(p.getCustomerId());
+        boolean agendado = p.getAgendadoPara() != null && p.getAgendadoPara().isAfter(today);
+
+        BigDecimal saldoApos;
+        if (agendado) {
+            p.setStatus(PaymentStatus.AGENDADO);
+            saldoApos = account.getSaldo();
+            if (payable != null) {
+                payable.setStatus(PayableStatus.AGENDADO);
+            }
+        } else {
+            if (account.getSaldo().compareTo(p.getValor()) < 0) {
+                metrics.payment(p.getTipo(), PortalMetrics.RECUSADO, p.getValor());
+                throw new SaldoInsuficienteException(p.getValor().subtract(account.getSaldo()));
+            }
+            p.setAgendadoPara(null);
+            saldoApos = debit(account, p, payable, now);
+        }
+        p.setApprovedBySub(who.sub());
+        p.setApprovedByNome(who.nome());
+        p.setApprovedAt(now);
+        if (payable != null) {
+            payableRepository.save(payable);
+        }
+        Payment saved = paymentRepository.save(p);
+        metrics.payment(saved.getTipo(), saved.getStatus().name(), saved.getValor());
+        log.info("Pagamento {} do cliente {} aprovado por {} ({})", saved.getId(), saved.getCustomerId(), who.sub(),
+                saved.getStatus());
+
+        Comprovante comprovante = new Comprovante(saved.getTipo(), saved.getValor(), saved.getDestinatario(),
+                saved.getDescricao(), now, saved.getAgendadoPara(), saved.getAutenticacao(),
+                contaOrigem(account), saved.getCodigoBarras());
+        return new PaymentCreated(saved.getId(), saved.getStatus(), saved.getAutenticacao(), saldoApos, comprovante);
+    }
+
+    /** Rejeita um pagamento PENDENTE_APROVACAO (motivo opcional); nada é debitado e a conta a pagar fica livre. */
+    @Transactional
+    public PaymentView reject(CurrentCustomer who, Long paymentId, String motivo) {
+        Payment p = lockedPending(who, paymentId);
+        p.setStatus(PaymentStatus.REJEITADO);
+        p.setRejectedBySub(who.sub());
+        p.setRejectedByNome(who.nome());
+        p.setRejectedAt(clock.instant());
+        p.setMotivoRejeicao(motivo == null || motivo.isBlank() ? null : motivo.trim());
+        Payment saved = paymentRepository.save(p);
+        metrics.payment(saved.getTipo(), PortalMetrics.REJEITADO, saved.getValor());
+        return PaymentView.of(saved);
+    }
+
+    /**
+     * Pagamento travado ({@code SELECT ... FOR UPDATE}) da empresa e ainda pendente: 404 se não existe ou é de outra
+     * empresa, 422 PAGAMENTO_NAO_PENDENTE, e 403 SEM_PERMISSAO (motivo AUTOR) se quem decide é quem pagou.
+     */
+    private Payment lockedPending(CurrentCustomer who, Long paymentId) {
+        Payment p = paymentRepository.findByIdForUpdate(paymentId)
+                .filter(x -> who.customerId().equals(x.getCustomerId()))
+                .orElseThrow(() -> new NotFoundException("PAGAMENTO_NAO_ENCONTRADO",
+                        "Pagamento " + paymentId + " não encontrado"));
+        if (p.getStatus() != PaymentStatus.PENDENTE_APROVACAO) {
+            throw new BusinessRuleException("PAGAMENTO_NAO_PENDENTE",
+                    "O pagamento " + paymentId + " está " + p.getStatus() + " e não aguarda aprovação");
+        }
+        if (who.sub() != null && who.sub().equals(p.getCreatedBySub())) {
+            throw new PermissionDeniedException(Permissoes.APROVAR_PAGAMENTOS, MOTIVO_AUTOR);
+        }
+        return p;
     }
 
     /** Ids dos agendados com data até {@code today} (inclusive), na ordem em que devem ser executados. */
@@ -218,17 +319,27 @@ public class PortalPaymentService {
         return result.saldoAtual();
     }
 
+    /** Conta a pagar já paga ou já agendada não aceita outro pagamento (422). */
+    private static void checkPayable(Payable payable) {
+        if (payable.getStatus() == PayableStatus.PAGO) {
+            throw new BusinessRuleException("CONTA_JA_PAGA", "Conta a pagar " + payable.getId() + " já está paga");
+        }
+        if (payable.getStatus() == PayableStatus.AGENDADO) {
+            throw new BusinessRuleException("CONTA_JA_AGENDADA",
+                    "Conta a pagar " + payable.getId() + " já tem pagamento agendado");
+        }
+    }
+
     private Payable loadPayable(Long customerId, Long payableId, BigDecimal valor) {
         Payable payable = payableRepository.findByIdForUpdate(payableId)
                 .filter(pb -> customerId.equals(pb.getCustomerId()))
                 .orElseThrow(() -> new NotFoundException("CONTA_A_PAGAR_NAO_ENCONTRADA",
                         "Conta a pagar " + payableId + " não encontrada"));
-        if (payable.getStatus() == PayableStatus.PAGO) {
-            throw new BusinessRuleException("CONTA_JA_PAGA", "Conta a pagar " + payableId + " já está paga");
-        }
-        if (payable.getStatus() == PayableStatus.AGENDADO) {
-            throw new BusinessRuleException("CONTA_JA_AGENDADA",
-                    "Conta a pagar " + payableId + " já tem pagamento agendado");
+        checkPayable(payable);
+        // Com a conta a pagar travada acima, dois pagamentos dela não passam daqui ao mesmo tempo.
+        if (paymentRepository.existsByPayableIdAndStatus(payableId, PaymentStatus.PENDENTE_APROVACAO)) {
+            throw new BusinessRuleException("PAGAMENTO_PENDENTE",
+                    "Conta a pagar " + payableId + " já tem pagamento aguardando aprovação");
         }
         if (payable.getValor().compareTo(valor) != 0) {
             throw new BusinessRuleException("VALOR_DIVERGENTE", "O valor " + valor

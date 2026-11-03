@@ -5,6 +5,7 @@ import java.util.List;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.GetMapping;
+import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
@@ -15,11 +16,15 @@ import com.erpbanking.transactions.portal.Permissoes;
 import com.erpbanking.transactions.portal.payment.PaymentDtos.PaymentCreated;
 import com.erpbanking.transactions.portal.payment.PaymentDtos.PaymentRequest;
 import com.erpbanking.transactions.portal.payment.PaymentDtos.PaymentView;
+import com.erpbanking.transactions.portal.payment.PaymentDtos.RejectRequest;
 import com.erpbanking.transactions.portal.payment.PortalPaymentService;
 
 import jakarta.validation.Valid;
 
-/** Portal do cliente: pagar (PIX, boleto, TED), agendar e consultar o histórico. */
+/**
+ * Portal do cliente: pagar (PIX, boleto, TED), agendar, consultar o histórico e aprovar ou rejeitar os pagamentos
+ * acima do limite do membro.
+ */
 @RestController
 @RequestMapping("/me/payments")
 public class MePaymentsController {
@@ -41,5 +46,21 @@ public class MePaymentsController {
     @GetMapping
     public List<PaymentView> history() {
         return payments.history(currentCustomer.requirePermission(Permissoes.VER_FINANCEIRO).customerId());
+    }
+
+    @GetMapping("/pending")
+    public List<PaymentView> pending() {
+        return payments.pending(currentCustomer.requirePermission(Permissoes.APROVAR_PAGAMENTOS).customerId());
+    }
+
+    @PostMapping("/{id}/approve")
+    public PaymentCreated approve(@PathVariable Long id) {
+        return payments.approve(currentCustomer.requirePermission(Permissoes.APROVAR_PAGAMENTOS), id);
+    }
+
+    @PostMapping("/{id}/reject")
+    public PaymentView reject(@PathVariable Long id, @Valid @RequestBody(required = false) RejectRequest body) {
+        return payments.reject(currentCustomer.requirePermission(Permissoes.APROVAR_PAGAMENTOS), id,
+                body == null ? null : body.motivo());
     }
 }

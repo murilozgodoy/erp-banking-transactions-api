@@ -55,7 +55,10 @@ public final class PaymentDtos {
             @JsonProperty("saldo_apos") BigDecimal saldoApos,
             Comprovante comprovante) {}
 
-    /** Item do histórico ({@code GET /me/payments}). */
+    /**
+     * Item do histórico ({@code GET /me/payments}) e da bandeja de aprovação ({@code GET /me/payments/pending}).
+     * Os campos de aprovação/rejeição são {@code null} quando não se aplicam.
+     */
     public record PaymentView(
             Long id,
             PaymentType tipo,
@@ -68,12 +71,21 @@ public final class PaymentDtos {
             PaymentStatus status,
             String autenticacao,
             @JsonProperty("criado_em") Instant criadoEm,
-            @JsonProperty("created_by_nome") String createdByNome) {
+            @JsonProperty("created_by_nome") String createdByNome,
+            @JsonProperty("approved_by_nome") String approvedByNome,
+            @JsonProperty("approved_at") Instant approvedAt,
+            @JsonProperty("rejected_by_nome") String rejectedByNome,
+            @JsonProperty("rejected_at") Instant rejectedAt,
+            @JsonProperty("motivo_rejeicao") String motivoRejeicao) {
 
         public static PaymentView of(Payment p) {
             return new PaymentView(p.getId(), p.getTipo(), p.getValor(), p.getDestinatario(), p.getDescricao(),
                     p.getPayableId(), p.getAgendadoPara(), p.getCodigoBarras(), p.getStatus(),
-                    p.getAutenticacao(), p.getCriadoEm(), p.getCreatedByNome());
+                    p.getAutenticacao(), p.getCriadoEm(), p.getCreatedByNome(), p.getApprovedByNome(),
+                    p.getApprovedAt(), p.getRejectedByNome(), p.getRejectedAt(), p.getMotivoRejeicao());
         }
     }
+
+    /** Corpo opcional de {@code POST /me/payments/{id}/reject}. */
+    public record RejectRequest(@Size(max = 255) String motivo) {}
 }
