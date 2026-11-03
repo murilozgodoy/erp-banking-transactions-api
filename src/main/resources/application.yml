@@ -57,6 +57,12 @@ app:
   onboarding:
     base-url: ${ONBOARDING_API_URL:http://localhost:8081}
 
+# Executor dos pagamentos agendados (agendado_para <= hoje, fuso America/Sao_Paulo).
+portal:
+  payments:
+    scheduler-enabled: ${PAYMENTS_SCHEDULER_ENABLED:true}
+    scheduler-delay-ms: ${PAYMENTS_SCHEDULER_DELAY_MS:300000}
+
 credit-score:
   base-url: ${CREDIT_SCORE_API_URL:http://localhost:8082}
   timeout-ms: 5000
