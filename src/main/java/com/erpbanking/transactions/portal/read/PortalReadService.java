@@ -346,13 +346,29 @@ public class PortalReadService {
                 abaixo++;
             }
             somaCobertura += cobertura;
-            rows.add(new InventoryRow(i.getId(), i.getSku(), i.getNome(), i.getQuantidade(), i.getMinimo(),
-                    money(i.getCustoUnitario()), money(i.getPrecoVenda()), i.getGiroDias(), i.getUltimaVenda(),
-                    cobertura, ehAbaixo, ehParado));
+            rows.add(row(i, cobertura));
         }
         BigDecimal coberturaMedia = itens.isEmpty() ? BigDecimal.ZERO.setScale(1)
                 : BigDecimal.valueOf(somaCobertura).divide(BigDecimal.valueOf(itens.size()), 1, RoundingMode.HALF_UP);
         return new Inventory(rows, money(total), money(parado), abaixo, coberturaMedia);
+    }
+
+    /**
+     * Um item no mesmo formato de {@code GET /me/inventory} {@code itens[]}, recalculado agora (usado na resposta
+     * de {@code POST /me/inventory/{id}/movements}).
+     */
+    public InventoryRow inventoryRow(Long customerId, InventoryItem item) {
+        LocalDate hoje = hoje();
+        List<Sale> vendasSku = sales.findByCustomerIdAndDataBetweenOrderByDataAsc(customerId,
+                        hoje.minusDays(JANELA_PADRAO_DIAS - 1L), hoje).stream()
+                .filter(s -> item.getSku().equals(s.getProdutoSku())).toList();
+        return row(item, coberturaDias(item, vendasSku));
+    }
+
+    private static InventoryRow row(InventoryItem i, int cobertura) {
+        return new InventoryRow(i.getId(), i.getSku(), i.getNome(), i.getQuantidade(), i.getMinimo(),
+                money(i.getCustoUnitario()), money(i.getPrecoVenda()), i.getGiroDias(), i.getUltimaVenda(),
+                cobertura, i.getQuantidade() < i.getMinimo(), i.getGiroDias() > GIRO_PARADO_DIAS);
     }
 
     /**
