@@ -5,7 +5,6 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 import java.math.BigDecimal;
 import java.time.LocalDate;
-import java.util.Map;
 
 import org.junit.jupiter.api.Test;
 
@@ -80,20 +79,6 @@ class PortalCalculationsTest {
         assertThat(GroupBy.DAY.rotulo(HOJE)).isEqualTo("2026-11-03");
         assertThat(GroupBy.WEEK.proximo(LocalDate.of(2026, 11, 2))).isEqualTo(LocalDate.of(2026, 11, 9));
         assertThat(GroupBy.MONTH.proximo(LocalDate.of(2026, 11, 1))).isEqualTo(LocalDate.of(2026, 12, 1));
-    }
-
-    @Test
-    void fluxoCaixaAcumulaSaldoEJogaVencidosNoDiaZero() {
-        var fluxo = PortalCalculations.fluxoCaixa(HOJE, 3, new BigDecimal("100"),
-                Map.of(HOJE.minusDays(2), new BigDecimal("10"), HOJE.plusDays(1), new BigDecimal("50")),
-                Map.of(HOJE.minusDays(1), new BigDecimal("30"), HOJE.plusDays(2), new BigDecimal("200")),
-                new BigDecimal("5"));
-        assertThat(fluxo).hasSize(3);
-        assertThat(fluxo.get(0).entradas()).isEqualByComparingTo("15");
-        assertThat(fluxo.get(0).saidas()).isEqualByComparingTo("30");
-        assertThat(fluxo.get(0).saldoProjetado()).isEqualByComparingTo("85");
-        assertThat(fluxo.get(1).saldoProjetado()).isEqualByComparingTo("140");
-        assertThat(fluxo.get(2).saldoProjetado()).isEqualByComparingTo("-55");
     }
 
     @Test

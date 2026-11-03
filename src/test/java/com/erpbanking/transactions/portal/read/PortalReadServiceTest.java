@@ -62,13 +62,45 @@ class PortalReadServiceTest {
         List<FluxoCaixaDia> fluxo = o.fluxoCaixa();
         assertThat(fluxo).hasSize(60);
         assertThat(fluxo.get(0).data()).isEqualTo(HOJE);
-        assertThat(fluxo.get(0).entradas()).isEqualByComparingTo("3.33");
+        // Vendas estimadas por dia da semana (janela 05/10..03/11: 5 terças e 5 segundas): PIX de 100 na terça
+        // → 20 em toda terça (D+0); crédito de 300 na segunda → 60 por segunda, × 0,9667 (mediana líquido/bruto
+        // dos recebíveis) em D+30.
+        assertThat(fluxo.get(0).entradas()).isEqualByComparingTo("20");
         assertThat(fluxo.get(0).saidas()).isEqualByComparingTo("1350");
-        assertThat(fluxo.get(0).saldoProjetado()).isEqualByComparingTo("-346.67");
-        assertThat(fluxo.get(5).entradas()).isEqualByComparingTo("293.33");
+        assertThat(fluxo.get(0).saldoProjetado()).isEqualByComparingTo("-330");
+        assertThat(fluxo.get(5).entradas()).isEqualByComparingTo("290");
         assertThat(fluxo.get(5).saidas()).isEqualByComparingTo("400");
+        assertThat(fluxo.get(7).entradas()).isEqualByComparingTo("20");
+        assertThat(fluxo.get(34).entradas()).isZero();
+        assertThat(fluxo.get(36).entradas()).isEqualByComparingTo("58");
         assertThat(fluxo.get(40).saidas()).isEqualByComparingTo("999");
         assertThat(fluxo.get(59).data()).isEqualTo(HOJE.plusDays(59));
+    }
+
+    @Test
+    void fluxoUsaDataDoAgendamentoEDespesaRecorrente() {
+        var folha = f.payables.findByCustomerIdOrderByVencimentoAsc(C).stream()
+                .filter(p -> p.getFornecedor().equals("Folha")).findFirst().orElseThrow();
+        var agendamento = new com.erpbanking.transactions.domain.Payment();
+        agendamento.setCustomerId(C);
+        agendamento.setTipo(com.erpbanking.transactions.domain.PaymentType.BOLETO);
+        agendamento.setDestinatario("Folha");
+        agendamento.setValor(bd("400.00"));
+        agendamento.setPayableId(folha.getId());
+        agendamento.setAgendadoPara(HOJE.plusDays(7));
+        agendamento.setStatus(com.erpbanking.transactions.domain.PaymentStatus.AGENDADO);
+        agendamento.setAutenticacao("AUT-2");
+        f.payments.save(agendamento);
+        var aluguel = f.payable(C, "Imobiliária", HOJE.minusDays(20), "800.00", PayableStatus.PAGO);
+        aluguel.setCategoria(com.erpbanking.transactions.domain.PayableCategory.ALUGUEL);
+        f.payables.save(aluguel);
+
+        var fluxo = service.overview(C).fluxoCaixa();
+        assertThat(fluxo.get(5).saidas()).isZero();
+        assertThat(fluxo.get(7).saidas()).isEqualByComparingTo("400");
+        // Aluguel pago em 14/10 se repete em 14/11 e 14/12 (nenhuma conta de aluguel lançada nesses meses).
+        assertThat(fluxo.get(11).saidas()).isEqualByComparingTo("800");
+        assertThat(fluxo.get(41).saidas()).isEqualByComparingTo("800");
     }
 
     @Test
