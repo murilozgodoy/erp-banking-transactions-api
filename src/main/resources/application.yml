@@ -25,6 +25,15 @@ spring:
   h2:
     console:
       enabled: false
+  rabbitmq:
+    # Ex.: amqp://erp:erp@rabbitmq:5672/ — vazio desliga a mensageria (no-op).
+    addresses: ${RABBITMQ_URL:}
+    connection-timeout: 2s
+
+# MESSAGING_ENABLED=true|false força ligar/desligar; vazio = ligado se RABBITMQ_URL estiver definida.
+messaging:
+  enabled: ${MESSAGING_ENABLED:}
+  exchange: erp.events
 
 credit-score:
   base-url: ${CREDIT_SCORE_API_URL:http://localhost:8082}
@@ -39,6 +48,10 @@ management:
     health:
       probes:
         enabled: true
+  health:
+    # Broker fora do ar não derruba o healthcheck: publicar é best effort.
+    rabbit:
+      enabled: false
   metrics:
     tags:
       application: ${spring.application.name}
