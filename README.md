@@ -119,7 +119,7 @@ Com o Onboarding fora do ar a resposta é **503** `{"error":"ONBOARDING_INDISPON
 | GET | `/me/statement?from=&to=` | Extrato da conta com `saldo_apos`, mais recente primeiro (padrão: 30 dias) |
 | GET | `/me/inventory` | Itens com cobertura em dias, valor total, valor parado (giro > 90 dias) e itens abaixo do mínimo |
 | GET | `/me/pendencias` | Contas atrasadas, vencendo hoje, saldo insuficiente, propostas em revisão e estoque baixo ou parado, com ação sugerida (e crédito, quando cabe) |
-| POST | `/me/payments` | PIX, boleto ou TED: debita na hora (422 `SALDO_INSUFICIENTE` com `faltam`) ou agenda (`agendado_para` futuro), e devolve o comprovante |
+| POST | `/me/payments` | PIX, boleto ou TED: debita na hora (422 `SALDO_INSUFICIENTE` com `faltam`) ou agenda (`agendado_para` futuro; no passado é 400), e devolve o comprovante. Com `payable_id`, o valor tem de ser o da conta (422 `VALOR_DIVERGENTE`) e ela não pode estar paga ou agendada (422 `CONTA_JA_PAGA` / `CONTA_JA_AGENDADA`) |
 | GET | `/me/payments` | Histórico de pagamentos |
 | GET | `/me/credit/offers` | Limite, taxa a partir de e prazo máximo por produto |
 | POST | `/me/credit/simulations` | Simulação Price com IOF e CET; fica salva por 7 dias |
@@ -141,6 +141,17 @@ o valor menos o IOF, e o CET anual é (1 + i)^12 − 1, com i sendo a TIR mensal
 IOF. Taxas e CET saem em **percentual** (`2.4900` = 2,49% a.m.). A aprovação é `PRE_APROVADO` para faixa BAIXO ou
 MEDIO dentro do limite, `NEGADO` para MUITO_ALTO e `ANALISE` nos demais casos. No pedido, `PRE_APROVADO` vira
 `APROVADO` com contrato na taxa da simulação, e `ANALISE` vira `REVISAO`.
+
+O limite mostrado é o **disponível**: desconta o valor já aprovado no mesmo produto (nunca fica negativo). Na
+antecipação aprovada, os recebíveis usados (os selecionados, ou os PREVISTO de vencimento mais próximo até cobrir o
+valor) passam a `ANTECIPADO` e saem do limite. Uma simulação vira no máximo um pedido, e uma `PRE_APROVADO` é
+revalidada contra o limite atual no momento do pedido.
+
+**Pagamentos agendados**: um job (`portal.payments.scheduler-delay-ms`, padrão 5 min; desligável com
+`PAYMENTS_SCHEDULER_ENABLED=false`) efetiva os agendados com `agendado_para` até hoje (America/Sao_Paulo) quando há
+saldo; sem saldo, o pagamento continua `AGENDADO` e é tentado de novo na próxima rodada.
+
+`GET /me/sales` aceita no máximo 400 dias entre `from` e `to` (400 `PARAMETRO_INVALIDO`).
 
 ### Swagger / OpenAPI
 
