@@ -68,6 +68,29 @@ public class Payment {
     @Column(name = "created_by_nome")
     private String createdByNome;
 
+    /** Quem aprovou o pagamento PENDENTE_APROVACAO (nulos nos que não passaram por aprovação). */
+    @Column(name = "approved_by_sub")
+    private String approvedBySub;
+
+    @Column(name = "approved_by_nome")
+    private String approvedByNome;
+
+    @Column(name = "approved_at")
+    private Instant approvedAt;
+
+    /** Quem rejeitou o pagamento PENDENTE_APROVACAO, quando e por quê (motivo opcional). */
+    @Column(name = "rejected_by_sub")
+    private String rejectedBySub;
+
+    @Column(name = "rejected_by_nome")
+    private String rejectedByNome;
+
+    @Column(name = "rejected_at")
+    private Instant rejectedAt;
+
+    @Column(name = "motivo_rejeicao")
+    private String motivoRejeicao;
+
     public Payment() {}
 
     public Long getId() { return id; }
@@ -100,4 +123,18 @@ public class Payment {
     public void setCreatedBySub(String createdBySub) { this.createdBySub = createdBySub; }
     public String getCreatedByNome() { return createdByNome; }
     public void setCreatedByNome(String createdByNome) { this.createdByNome = createdByNome; }
+    public String getApprovedBySub() { return approvedBySub; }
+    public void setApprovedBySub(String approvedBySub) { this.approvedBySub = approvedBySub; }
+    public String getApprovedByNome() { return approvedByNome; }
+    public void setApprovedByNome(String approvedByNome) { this.approvedByNome = approvedByNome; }
+    public Instant getApprovedAt() { return approvedAt; }
+    public void setApprovedAt(Instant approvedAt) { this.approvedAt = approvedAt; }
+    public String getRejectedBySub() { return rejectedBySub; }
+    public void setRejectedBySub(String rejectedBySub) { this.rejectedBySub = rejectedBySub; }
+    public String getRejectedByNome() { return rejectedByNome; }
+    public void setRejectedByNome(String rejectedByNome) { this.rejectedByNome = rejectedByNome; }
+    public Instant getRejectedAt() { return rejectedAt; }
+    public void setRejectedAt(Instant rejectedAt) { this.rejectedAt = rejectedAt; }
+    public String getMotivoRejeicao() { return motivoRejeicao; }
+    public void setMotivoRejeicao(String motivoRejeicao) { this.motivoRejeicao = motivoRejeicao; }
 }
