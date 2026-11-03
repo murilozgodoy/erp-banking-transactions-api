@@ -60,6 +60,13 @@ Em produção, defina-as no ambiente do processo/container (têm precedência so
 | POST | `/credits` | `write:credits` | Solicita crédito (consulta o Score) |
 | GET | `/credits/{id}` | `read:credits` | Consulta situação do crédito |
 
+### Swagger / OpenAPI
+
+Documentação interativa (springdoc) em `/swagger-ui/index.html` e JSON em `/v3/api-docs` — públicos; as rotas
+continuam exigindo o Bearer token (botão **Authorize**). Atrás do API Gateway use
+`http://localhost:8080/transactions/swagger-ui/index.html`: o `X-Forwarded-Prefix` enviado pelo nginx é aplicado pelo
+`ForwardedHeaderFilter`, então as URLs geradas já saem com o prefixo `/transactions`.
+
 ## Padrões de projeto aplicados
 
 - **Singleton**: `RestClientConfig` provê o `RestTemplate` como bean singleton do Spring (`@Bean`)
