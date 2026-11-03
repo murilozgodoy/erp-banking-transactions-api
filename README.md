@@ -17,7 +17,19 @@ mvn spring-boot:run
 
 Porta padrão: 8080. H2 in-memory por padrão. Console H2 desativado.
 
-Health: `GET http://localhost:8080/health`
+Health: `GET http://localhost:8080/health` (e `GET /actuator/health`, usado pelo `HEALTHCHECK` da imagem).
+
+## Docker
+
+```bash
+docker build -t transactions-api .
+docker run --rm -p 8080:8080 --env-file .env transactions-api
+```
+
+Imagem `eclipse-temurin:21-jre-alpine`, usuário não-root (`app`, uid 10001), `HEALTHCHECK` em `/actuator/health` e
+`JAVA_TOOL_OPTIONS="-XX:MaxRAMPercentage=75 -XX:+UseSerialGC -XX:+ExitOnOutOfMemoryError"` (pode ser sobrescrito).
+O CI publica `ghcr.io/murilozgodoy/erp-banking-transactions-api:latest` e `:<sha>` a cada push na `main` (job `publish`).
+O stack completo (gateway, Postgres, RabbitMQ, Prometheus, Grafana) fica no repo `erp-banking-infra`.
 
 ## Testes com cobertura
 
@@ -44,7 +56,18 @@ Em produção, defina-as no ambiente do processo/container (têm precedência so
 | `DATABASE_URL` | `jdbc:h2:mem:transactions;...` | JDBC URL |
 | `DATABASE_USER` | sa | usuário |
 | `DATABASE_PASSWORD` | (vazio) | senha |
-| `DATABASE_DRIVER` | `org.h2.Driver` | driver |
+| `DATABASE_DRIVER` | `org.h2.Driver` | driver (`org.postgresql.Driver` em produção) |
+| `DDL_AUTO` | `update` | `spring.jpa.hibernate.ddl-auto`; as tabelas são criadas no startup |
+| `RABBITMQ_URL` | (vazio) | Ex.: `amqp://erp:erp@rabbitmq:5672/`. Vazio = mensageria desligada (no-op) |
+| `MESSAGING_ENABLED` | (vazio) | `true`/`false` força ligar/desligar; vazio = segue o `RABBITMQ_URL` |
+| `AUTO_OPEN_ACCOUNT` | `false` | Consome `customer.created` e abre conta corrente automaticamente |
+
+Em produção (compose do infra): `DATABASE_URL=jdbc:postgresql://postgres:5432/erp?currentSchema=transactions`. O schema
+`transactions` é criado pelo init do Postgres e o Hibernate cria/atualiza as tabelas dentro dele.
+
+Resiliência da chamada ao Score (`credit-score.*` no `application.yml`): timeout de conexão de 2 s e de leitura de 5 s,
+2 novas tentativas com backoff exponencial em falhas transitórias, e circuit breaker que abre após 5 falhas seguidas e
+fica 30 s aberto. Com o circuito aberto ou o Score fora do ar, `POST /credits` responde **503** com mensagem clara.
 
 ## Endpoints
 
@@ -67,11 +90,51 @@ continuam exigindo o Bearer token (botão **Authorize**). Atrás do API Gateway 
 `http://localhost:8080/transactions/swagger-ui/index.html`: o `X-Forwarded-Prefix` enviado pelo nginx é aplicado pelo
 `ForwardedHeaderFilter`, então as URLs geradas já saem com o prefixo `/transactions`.
 
+## Observabilidade (Prometheus)
+
+- `GET /actuator/prometheus` e `GET /actuator/health` são públicos. O gateway **não** os expõe; o Prometheus coleta
+  pela rede interna.
+- Todas as séries levam a tag `application="transactions-api"`. `http_server_requests_seconds` tem histograma (p95/p99).
+- Métricas de negócio (nomes de contrato com o Grafana):
+
+| Métrica | Labels | Quando |
+|---------|--------|--------|
+| `credit_decisions_total` | `status` = APROVADO, REVISAO, NEGADO | decisão de crédito confirmada (após o commit) |
+| `transactions_created_total` | `tipo` = CREDIT, DEBIT | transação registrada (após o commit) |
+| `events_published_total` | `routing_key`, `result` = ok, error | publicação no RabbitMQ |
+| `events_consumed_total` | `routing_key`, `result` = ok, duplicate, invalid | consumo de `customer.created` |
+
+Usa `micrometer-registry-prometheus-simpleclient`: o cliente Prometheus 1.x remove o sufixo `_created` dos nomes e
+`transactions_created_total` viraria `transactions_total`.
+
+## Mensageria (RabbitMQ)
+
+Exchange `erp.events` (topic, durável). As mensagens são JSON persistentes com `event_id` (UUID, também no
+`message_id`), `event_type` e `occurred_at` (ISO-8601 UTC). Os eventos são publicados **depois do commit**
+(`@TransactionalEventListener`): o que sofreu rollback não sai. Falha no broker nunca quebra a requisição HTTP;
+gera log e `events_published_total{result="error"}`.
+
+| Routing key | Direção | Payload |
+|-------------|---------|---------|
+| `credit.decided` | publica | `credit_request_id, customer_id, valor_solicitado, prazo_meses, score, faixa_risco, status, motivo, taxa_juros` |
+| `transaction.created` | publica | `transaction_id, account_id, customer_id, tipo, valor, saldo_apos` |
+| `customer.created` | consome (fila `transactions.customer-created`, com `AUTO_OPEN_ACCOUNT=true`) | `customer_id, nome, cpf, email` |
+
+O consumo de `customer.created` abre uma conta corrente com saldo zero e é idempotente: se o cliente já tem conta, a
+mensagem é ignorada. Payload sem `customer_id` válido é descartado sem requeue. Fila e binding são declarados pelo
+próprio serviço.
+
+Classes: `events/` (eventos de domínio e `DomainEventListener`), `messaging/` (`EventPublisher` com implementações
+Rabbit e no-op escolhidas por `MessagingEnabledCondition`, e `CustomerCreatedListener`), `metrics/BusinessMetrics`.
+
 ## Padrões de projeto aplicados
 
 - **Singleton**: `RestClientConfig` provê o `RestTemplate` como bean singleton do Spring (`@Bean`)
 - **Repository (Spring Data JPA)**: `AccountRepository`, `TransactionRepository`, `CreditRequestRepository`, `ContractRepository`
-- Preparado para **Strategy** de política de crédito nas próximas etapas
+- **Observer**: eventos de domínio do Spring (`ApplicationEventPublisher` + `@TransactionalEventListener`) separam a
+  regra de negócio das métricas e da mensageria
+- **Strategy**: `EventPublisher` (RabbitMQ ou no-op), escolhido por configuração
+- **Circuit Breaker + Retry** na chamada ao Credit Score
 
 ## Autenticação e autorização (Auth0)
 
@@ -81,7 +144,7 @@ issuer (`https://<AUTH0_DOMAIN>/`), a audience, a expiração e o `sub`.
 - Sem token ou com token inválido: **401** (`WWW-Authenticate: Bearer`).
 - Token sem a permissão da rota: **403**. As permissões da claim `permissions` (RBAC do Auth0) e
   de `scope` viram authorities do Spring.
-- `/health` é público; os endpoints do Actuator exigem token. Preflight CORS não exige token.
+- `/health`, `/actuator/**` (health, info, prometheus) e o Swagger são públicos. Preflight CORS não exige token.
 - Sem `AUTH0_DOMAIN` ou `AUTH0_AUDIENCE`, a inicialização falha explicitamente.
 
 **Token relay:** o `RestTemplate` usado pelo `CreditScoreClient` tem um interceptor
