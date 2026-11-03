@@ -120,7 +120,8 @@ continuam exigindo o Bearer token (botão **Authorize**). Atrás do API Gateway 
 | `credit_decisions_total` | `status` = APROVADO, REVISAO, NEGADO | decisão de crédito confirmada (após o commit) |
 | `transactions_created_total` | `tipo` = CREDIT, DEBIT | transação registrada (após o commit) |
 | `events_published_total` | `routing_key`, `result` = ok, error | publicação no RabbitMQ |
-| `events_consumed_total` | `routing_key`, `result` = ok, duplicate, invalid | consumo de `customer.created` |
+| `events_consumed_total` | `routing_key`, `result` = ok, duplicate, invalid, error | consumo de `customer.created` e `customer.onboarding_submitted` |
+| `seeder_runs_total` | `result` = ok, skipped, error | seeder do portal (skipped = cliente já tinha dados) |
 
 Usa `micrometer-registry-prometheus-simpleclient`: o cliente Prometheus 1.x remove o sufixo `_created` dos nomes e
 `transactions_created_total` viraria `transactions_total`.
@@ -137,10 +138,17 @@ gera log e `events_published_total{result="error"}`.
 | `credit.decided` | publica | `credit_request_id, customer_id, valor_solicitado, prazo_meses, score, faixa_risco, status, motivo, taxa_juros` |
 | `transaction.created` | publica | `transaction_id, account_id, customer_id, tipo, valor, saldo_apos` |
 | `customer.created` | consome (publicado pelo Onboarding) (fila `transactions.customer-created`, com `AUTO_OPEN_ACCOUNT=true`) | `customer_id, nome, cpf, email` |
+| `customer.onboarding_submitted` | consome (publicado pelo Onboarding) (fila `transactions.onboarding-submitted`, sempre que a mensageria está ligada) | `customer_id, auth0_sub, segmento, empresa, respostas, observacoes` |
 
 O consumo de `customer.created` abre uma conta corrente com saldo zero e é idempotente: se o cliente já tem conta, a
 mensagem é ignorada. Payload sem `customer_id` válido é descartado sem requeue. Fila e binding são declarados pelo
 próprio serviço.
+
+O consumo de `customer.onboarding_submitted` (`portal/seed/PortalSeeder`) popula o portal ErpIa do cliente PJ numa
+transação: abre a conta corrente se não existir (PJ não recebe `customer.created`) e gera dados determinísticos
+(semente = `customer_id`) a partir das `respostas`: 120 dias de vendas, recebíveis de cartão (de 30 dias atrás até
+90 dias à frente), contas a pagar (30 dias pagos, 60 à frente e 2 ou 3 atrasadas), estoque (quando `possui_estoque`)
+e o extrato dos últimos 30 dias, que fecha no saldo da conta. Idempotente: cliente que já tem vendas é ignorado.
 
 Classes: `events/` (eventos de domínio e `DomainEventListener`), `messaging/` (`EventPublisher` com implementações
 Rabbit e no-op escolhidas por `MessagingEnabledCondition`, e `CustomerCreatedListener`), `metrics/BusinessMetrics`.
