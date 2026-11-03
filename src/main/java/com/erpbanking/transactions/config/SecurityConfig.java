@@ -28,6 +28,9 @@ public class SecurityConfig {
     public static final String WRITE_ACCOUNTS = "write:accounts";
     public static final String READ_CREDITS = "read:credits";
     public static final String WRITE_CREDITS = "write:credits";
+    /** Portal do cliente: rotas /me (GET = read:self, POST = write:self). */
+    public static final String READ_SELF = "read:self";
+    public static final String WRITE_SELF = "write:self";
 
     @Bean
     SecurityFilterChain securityFilterChain(HttpSecurity http) throws Exception {
@@ -40,6 +43,9 @@ public class SecurityConfig {
                         .requestMatchers(HttpMethod.POST, "/accounts", "/transactions").hasAuthority(WRITE_ACCOUNTS)
                         .requestMatchers(HttpMethod.GET, "/credits/**").hasAuthority(READ_CREDITS)
                         .requestMatchers(HttpMethod.POST, "/credits").hasAuthority(WRITE_CREDITS)
+                        .requestMatchers(HttpMethod.GET, "/me", "/me/**").hasAuthority(READ_SELF)
+                        .requestMatchers(HttpMethod.POST, "/me/**").hasAuthority(WRITE_SELF)
+                        .requestMatchers("/me", "/me/**").denyAll()
                         .anyRequest().authenticated())
                 .oauth2ResourceServer(oauth -> oauth.jwt(jwt -> jwt.jwtAuthenticationConverter(jwtAuthenticationConverter())))
                 .build();
