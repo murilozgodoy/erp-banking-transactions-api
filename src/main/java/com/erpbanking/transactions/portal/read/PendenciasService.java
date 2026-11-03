@@ -127,7 +127,8 @@ public class PendenciasService {
                         "Restam " + i.getQuantidade() + " unidades (mínimo " + i.getMinimo() + "). Repor "
                                 + faltamUn + " unidades custa cerca de " + brl(valor)
                                 + "; dá para financiar a compra com o ErpIa.",
-                        valor, hoje, new Acao("Ver estoque", ROTA_ESTOQUE + "?sku=" + i.getSku(),
+                        // Abre direto o painel "Movimentar" do item na aba Estoque (registrar a entrada).
+                        valor, hoje, new Acao("Repor estoque", ROTA_ESTOQUE + "?sku=" + i.getSku() + "&movimentar=1",
                                 new CreditoSugerido(FINANCIAMENTO_ESTOQUE, valor))));
             }
             if (i.getGiroDias() > PortalReadService.GIRO_PARADO_DIAS) {
