@@ -8,6 +8,7 @@ import java.util.Optional;
 import java.util.function.Function;
 import java.util.stream.Collectors;
 
+import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.data.domain.Sort;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -18,6 +19,7 @@ import com.erpbanking.transactions.domain.CreditStatus;
 import com.erpbanking.transactions.dto.CreditRequestDto;
 import com.erpbanking.transactions.dto.CreditResponseDto;
 import com.erpbanking.transactions.dto.ScoreResponse;
+import com.erpbanking.transactions.events.CreditDecidedEvent;
 import com.erpbanking.transactions.exception.ApiExceptions.CreditRequestNotFoundException;
 import com.erpbanking.transactions.repository.ContractRepository;
 import com.erpbanking.transactions.repository.CreditRequestRepository;
@@ -29,13 +31,16 @@ public class CreditService {
     private final CreditRequestRepository creditRequestRepository;
     private final ContractRepository contractRepository;
     private final CreditScoreClient scoreClient;
+    private final ApplicationEventPublisher events;
 
     public CreditService(CreditRequestRepository creditRequestRepository,
                          ContractRepository contractRepository,
-                         CreditScoreClient scoreClient) {
+                         CreditScoreClient scoreClient,
+                         ApplicationEventPublisher events) {
         this.creditRequestRepository = creditRequestRepository;
         this.contractRepository = contractRepository;
         this.scoreClient = scoreClient;
+        this.events = events;
     }
 
     @Transactional
@@ -50,6 +55,7 @@ public class CreditService {
             cr.setStatus(CreditStatus.NEGADO);
             cr.setMotivo("Cliente sem score de crédito registrado");
             creditRequestRepository.save(cr);
+            publishDecision(cr, null, BigDecimal.ZERO);
             return CreditResponseDto.of(cr, BigDecimal.ZERO, BigDecimal.ZERO);
         }
 
@@ -68,6 +74,7 @@ public class CreditService {
             taxa = outcome.taxa;
             contractRepository.save(new Contract(cr.getId(), taxa, valorAprovado));
         }
+        publishDecision(cr, score.faixaRisco(), taxa);
         return CreditResponseDto.of(cr, valorAprovado, taxa);
     }
 
@@ -94,6 +101,12 @@ public class CreditService {
                     ? CreditResponseDto.of(cr, BigDecimal.ZERO, BigDecimal.ZERO)
                     : CreditResponseDto.of(cr, contract.getValorAprovado(), contract.getTaxaJuros());
         }).toList();
+    }
+
+    /** Publicado após o commit (ver DomainEventListener). */
+    private void publishDecision(CreditRequest cr, String faixaRisco, BigDecimal taxa) {
+        events.publishEvent(new CreditDecidedEvent(cr.getId(), cr.getCustomerId(), cr.getValorSolicitado(),
+                cr.getPrazoMeses(), cr.getScoreSnapshot(), faixaRisco, cr.getStatus(), cr.getMotivo(), taxa));
     }
 
     private DecisionOutcome decide(String faixaRisco, BigDecimal valor) {
