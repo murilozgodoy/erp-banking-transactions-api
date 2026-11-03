@@ -28,6 +28,9 @@ spring:
   h2:
     console:
       enabled: false
+  mvc:
+    # Nunca logar parâmetros e cabeçalhos (Authorization) das requisições, nem com DEBUG ligado.
+    log-request-details: false
   rabbitmq:
     # Ex.: amqp://erp:erp@rabbitmq:5672/ — vazio desliga a mensageria (no-op).
     addresses: ${RABBITMQ_URL:}
@@ -42,6 +45,12 @@ spring:
           max-attempts: 3
           initial-interval: 1s
           multiplier: 2
+
+logging:
+  level:
+    # Em DEBUG estes pacotes logam requisições (cabeçalhos/corpos, inclusive o token repassado ao Onboarding e Score).
+    org.springframework.web: INFO
+    org.springframework.security: INFO
 
 # MESSAGING_ENABLED=true|false força ligar/desligar; vazio = ligado se RABBITMQ_URL estiver definida.
 messaging:

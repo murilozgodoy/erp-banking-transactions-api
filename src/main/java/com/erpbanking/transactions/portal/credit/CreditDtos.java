@@ -24,7 +24,7 @@ public final class CreditDtos {
             @NotNull CreditProduct produto,
             @NotNull @Positive @Digits(integer = 17, fraction = 2) BigDecimal valor,
             @JsonProperty("prazo_meses") @NotNull @Min(1) Integer prazoMeses,
-            @JsonProperty("receivable_ids") @Size(max = 500) List<@NotNull Long> receivableIds) {}
+            @JsonProperty("receivable_ids") @Size(max = 200) List<@NotNull Long> receivableIds) {}
 
     /** Resposta de {@code POST /me/credit/simulations}. */
     public record SimulationResponse(

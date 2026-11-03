@@ -10,6 +10,7 @@ import org.springframework.web.client.RestClientException;
 import org.springframework.web.client.RestTemplate;
 
 import com.erpbanking.transactions.config.CreditScoreProperties;
+import com.erpbanking.transactions.config.LogSafe;
 import com.fasterxml.jackson.annotation.JsonIgnoreProperties;
 import com.fasterxml.jackson.annotation.JsonProperty;
 
@@ -55,7 +56,7 @@ public class ScoreAnalysisClient {
         } catch (HttpClientErrorException.NotFound e) {
             return Optional.empty();
         } catch (RestClientException e) {
-            log.warn("Score GET /me/analysis indisponível; seguindo sem análise: {}", e.getMessage());
+            log.warn("Score GET /me/analysis indisponível; seguindo sem análise: {}", LogSafe.describe(e));
             return Optional.empty();
         }
     }
