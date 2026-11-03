@@ -31,12 +31,14 @@ import com.erpbanking.transactions.domain.InventoryItem;
 import com.erpbanking.transactions.domain.Payable;
 import com.erpbanking.transactions.domain.PayableStatus;
 import com.erpbanking.transactions.domain.Payment;
+import com.erpbanking.transactions.domain.PaymentStatus;
 import com.erpbanking.transactions.domain.Receivable;
 import com.erpbanking.transactions.domain.ReceivableStatus;
 import com.erpbanking.transactions.domain.Sale;
 import com.erpbanking.transactions.domain.Transaction;
 import com.erpbanking.transactions.domain.TransactionType;
 import com.erpbanking.transactions.portal.read.MeReadDtos.Conta;
+import com.erpbanking.transactions.portal.read.MeReadDtos.FluxoCaixaDia;
 import com.erpbanking.transactions.portal.read.MeReadDtos.Inventory;
 import com.erpbanking.transactions.portal.read.MeReadDtos.InventoryRow;
 import com.erpbanking.transactions.portal.read.MeReadDtos.Overview;
@@ -130,17 +132,15 @@ public class PortalReadService {
         BigDecimal receita30 = soma(atual, Sale::getValor);
         BigDecimal receitaAnterior = soma(ultimos60.stream().filter(s -> s.getData().isBefore(inicio30)).toList(),
                 Sale::getValor);
-        BigDecimal foraCartao = soma(atual.stream()
-                .filter(s -> !PortalCalculations.pagamentoCartao(s.getFormaPagamento())).toList(), Sale::getValor);
-
-        List<Receivable> previstos = receivables.findByCustomerIdOrderByVencimentoAsc(customerId).stream()
+        List<Receivable> todosRecebiveis = receivables.findByCustomerIdOrderByVencimentoAsc(customerId);
+        List<Receivable> previstos = todosRecebiveis.stream()
                 .filter(r -> r.getStatus() == ReceivableStatus.PREVISTO).toList();
         BigDecimal recebiveis90 = soma(previstos.stream()
                 .filter(r -> !r.getVencimento().isBefore(hoje) && !r.getVencimento().isAfter(hoje.plusDays(90)))
                 .toList(), Receivable::getValorLiquido);
 
-        List<Payable> abertos = payables.findByCustomerIdOrderByVencimentoAsc(customerId).stream()
-                .filter(p -> emAberto(p.getStatus())).toList();
+        List<Payable> todasContas = payables.findByCustomerIdOrderByVencimentoAsc(customerId);
+        List<Payable> abertos = todasContas.stream().filter(p -> emAberto(p.getStatus())).toList();
         BigDecimal aPagar30 = soma(abertos.stream().filter(p -> !p.getVencimento().isAfter(hoje.plusDays(30)))
                 .toList(), Payable::getValor);
         BigDecimal atrasados = soma(abertos.stream()
@@ -149,19 +149,32 @@ public class PortalReadService {
         BigDecimal estoque = money(inventory.findByCustomerIdOrderBySkuAsc(customerId).stream()
                 .map(PortalReadService::valorEstoque).reduce(BigDecimal.ZERO, BigDecimal::add));
 
-        Map<LocalDate, BigDecimal> recebiveisPorDia = previstos.stream().collect(Collectors.groupingBy(
-                Receivable::getVencimento, TreeMap::new,
-                Collectors.reducing(BigDecimal.ZERO, Receivable::getValorLiquido, BigDecimal::add)));
-        Map<LocalDate, BigDecimal> pagaveisPorDia = abertos.stream().collect(Collectors.groupingBy(
-                Payable::getVencimento, TreeMap::new,
-                Collectors.reducing(BigDecimal.ZERO, Payable::getValor, BigDecimal::add)));
-        BigDecimal vendasDiarias = foraCartao.divide(BigDecimal.valueOf(JANELA_PADRAO_DIAS), 2, RoundingMode.HALF_UP);
-
         return new Overview(saldo, conta, receita30, PortalCalculations.variacaoPct(receita30, receitaAnterior),
                 media(receita30, atual.size()), recebiveis90, aPagar30, atrasados, estoque,
                 pendencias.pendencias(customerId).size(),
-                PortalCalculations.fluxoCaixa(hoje, FLUXO_DIAS, saldo, recebiveisPorDia, pagaveisPorDia,
-                        vendasDiarias));
+                fluxoCaixa(customerId, hoje, saldo, atual, todosRecebiveis, todasContas));
+    }
+
+    /**
+     * Fluxo de caixa de {@value #FLUXO_DIAS} dias a partir das vendas dos últimos 30 dias, de todos os recebíveis e
+     * de todas as contas (as pagas alimentam as despesas recorrentes). Contas com pagamento agendado saem na data
+     * do agendamento. O modelo está documentado em {@link CashFlowProjection}.
+     */
+    private List<FluxoCaixaDia> fluxoCaixa(Long customerId, LocalDate hoje, BigDecimal saldo, List<Sale> vendas30,
+                                           List<Receivable> recebiveis, List<Payable> contas) {
+        Map<Long, LocalDate> agendamentos = new HashMap<>();
+        for (Payment p : payments.findByCustomerIdOrderByIdDesc(customerId)) {
+            if (p.getStatus() == PaymentStatus.AGENDADO && p.getPayableId() != null && p.getAgendadoPara() != null) {
+                agendamentos.putIfAbsent(p.getPayableId(), p.getAgendadoPara());
+            }
+        }
+        return CashFlowProjection.projetar(hoje, FLUXO_DIAS, saldo,
+                vendas30.stream().map(s -> new CashFlowProjection.Venda(s.getData(), s.getFormaPagamento(),
+                        s.getParcelas() == null ? 1 : s.getParcelas(), s.getValor())).toList(),
+                recebiveis.stream().map(r -> new CashFlowProjection.Recebivel(r.getVencimento(), r.getValorBruto(),
+                        r.getValorLiquido(), r.getStatus())).toList(),
+                contas.stream().map(p -> new CashFlowProjection.Conta(p.getVencimento(), agendamentos.get(p.getId()),
+                        p.getCategoria(), p.getStatus(), p.getFornecedor(), p.getValor())).toList());
     }
 
     // ---------------------------------------------------------------- sales

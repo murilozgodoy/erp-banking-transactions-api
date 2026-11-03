@@ -10,15 +10,11 @@ import java.time.ZoneId;
 import java.time.format.DateTimeFormatter;
 import java.time.temporal.ChronoUnit;
 import java.time.temporal.TemporalAdjusters;
-import java.util.ArrayList;
-import java.util.List;
 import java.util.Locale;
-import java.util.Map;
 
 import com.erpbanking.transactions.domain.Payable;
 import com.erpbanking.transactions.domain.PayableStatus;
 import com.erpbanking.transactions.domain.PaymentMethod;
-import com.erpbanking.transactions.portal.read.MeReadDtos.FluxoCaixaDia;
 
 /** Cálculos puros do portal (sem banco), para teste unitário direto. */
 public final class PortalCalculations {
@@ -141,39 +137,6 @@ public final class PortalCalculations {
 
     public static LocalDate segunda(LocalDate d) {
         return d.with(TemporalAdjusters.previousOrSame(DayOfWeek.MONDAY));
-    }
-
-    /**
-     * Fluxo de caixa projetado de {@code dias} dias a partir de hoje (dia 0), começando do saldo atual.
-     * Entradas = recebíveis previstos do dia (vencidos e ainda previstos caem no dia 0) + estimativa diária de
-     * vendas fora do cartão. Saídas = contas em aberto pelo vencimento (as atrasadas caem no dia 0).
-     */
-    public static List<FluxoCaixaDia> fluxoCaixa(LocalDate hoje, int dias, BigDecimal saldoInicial,
-                                                 Map<LocalDate, BigDecimal> recebiveisPorDia,
-                                                 Map<LocalDate, BigDecimal> pagaveisPorDia,
-                                                 BigDecimal vendasDiariasForaCartao) {
-        List<FluxoCaixaDia> out = new ArrayList<>(dias);
-        BigDecimal saldo = money(saldoInicial);
-        for (int i = 0; i < dias; i++) {
-            LocalDate d = hoje.plusDays(i);
-            BigDecimal entradas = money(vendasDiariasForaCartao);
-            BigDecimal saidas = BigDecimal.ZERO;
-            for (var e : recebiveisPorDia.entrySet()) {
-                if (i == 0 ? !e.getKey().isAfter(d) : e.getKey().equals(d)) {
-                    entradas = entradas.add(e.getValue());
-                }
-            }
-            for (var e : pagaveisPorDia.entrySet()) {
-                if (i == 0 ? !e.getKey().isAfter(d) : e.getKey().equals(d)) {
-                    saidas = saidas.add(e.getValue());
-                }
-            }
-            entradas = money(entradas);
-            saidas = money(saidas);
-            saldo = saldo.add(entradas).subtract(saidas);
-            out.add(new FluxoCaixaDia(d, entradas, saidas, saldo));
-        }
-        return out;
     }
 
     public static long diasEntre(LocalDate de, LocalDate ate) {
