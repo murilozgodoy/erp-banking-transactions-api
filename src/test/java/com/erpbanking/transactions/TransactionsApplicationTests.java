@@ -1,6 +1,8 @@
 package com.erpbanking.transactions;
 
 import org.junit.jupiter.api.Test;
+import org.springframework.amqp.rabbit.config.SimpleRabbitListenerContainerFactory;
+import org.springframework.retry.interceptor.RetryOperationsInterceptor;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.boot.test.mock.mockito.MockBean;
@@ -24,6 +26,13 @@ class TransactionsApplicationTests {
     @Test
     void contextLoads() {
         assertThat(ctx).isNotNull();
+    }
+
+    @Test
+    void rabbitListenersRetryWithBackoffInsteadOfRequeueingForever() {
+        SimpleRabbitListenerContainerFactory factory = ctx.getBean(SimpleRabbitListenerContainerFactory.class);
+        assertThat(factory.getAdviceChain()).hasSize(1);
+        assertThat(factory.getAdviceChain()[0]).isInstanceOf(RetryOperationsInterceptor.class);
     }
 
     @Test
