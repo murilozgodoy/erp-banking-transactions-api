@@ -101,6 +101,7 @@ class MePaymentsControllerTest {
                 .andExpect(jsonPath("$.comprovante.data_hora").exists())
                 .andExpect(jsonPath("$.comprovante.conta_origem.id").value(acc.getId()))
                 .andExpect(jsonPath("$.comprovante.conta_origem.agencia").value("0001"))
+                .andExpect(jsonPath("$.comprovante.conta_origem.numero").value(matchesPattern("[0-9]{6}-[0-9]")))
                 .andExpect(jsonPath("$.comprovante.codigo_barras").value(payable.getCodigoBarras()));
 
         assertThat(accounts.findById(acc.getId()).orElseThrow().getSaldo()).isEqualByComparingTo("850.00");

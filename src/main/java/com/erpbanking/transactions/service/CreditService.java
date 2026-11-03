@@ -78,6 +78,36 @@ public class CreditService {
         return CreditResponseDto.of(cr, valorAprovado, taxa);
     }
 
+    /**
+     * Pedido do portal já precificado: o score/faixa vieram do Score {@code GET /me/analysis} e a taxa
+     * da simulação, então não consulta o Score de novo. APROVADO gera o contrato na taxa informada.
+     */
+    @Transactional
+    public CreditResponseDto solicitarPrecificado(PricedDecision d) {
+        CreditRequest cr = new CreditRequest();
+        cr.setCustomerId(d.customerId());
+        cr.setValorSolicitado(d.valor());
+        cr.setPrazoMeses(d.prazoMeses());
+        cr.setScoreSnapshot(d.score());
+        cr.setStatus(d.status());
+        cr.setMotivo(d.motivo());
+        creditRequestRepository.save(cr);
+
+        BigDecimal valorAprovado = BigDecimal.ZERO;
+        BigDecimal taxa = BigDecimal.ZERO;
+        if (d.status() == CreditStatus.APROVADO) {
+            valorAprovado = d.valor();
+            taxa = d.taxaJuros();
+            contractRepository.save(new Contract(cr.getId(), taxa, valorAprovado));
+        }
+        publishDecision(cr, d.faixaRisco(), taxa);
+        return CreditResponseDto.of(cr, valorAprovado, taxa);
+    }
+
+    /** Decisão já tomada pelo portal; {@code taxaJuros} é a fração mensal (ex.: 0.0249). */
+    public record PricedDecision(Long customerId, BigDecimal valor, int prazoMeses, Double score,
+                                 String faixaRisco, CreditStatus status, String motivo, BigDecimal taxaJuros) {}
+
     public CreditResponseDto consultar(Long id) {
         CreditRequest cr = creditRequestRepository.findById(id)
                 .orElseThrow(() -> new CreditRequestNotFoundException("Crédito " + id + " não encontrado"));

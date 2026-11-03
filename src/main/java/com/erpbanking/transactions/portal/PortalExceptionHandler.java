@@ -13,6 +13,7 @@ import org.springframework.web.bind.MethodArgumentNotValidException;
 import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
 
+import com.erpbanking.transactions.controller.MeCreditController;
 import com.erpbanking.transactions.controller.MePaymentsController;
 import com.erpbanking.transactions.portal.PortalExceptions.BusinessRuleException;
 import com.erpbanking.transactions.portal.PortalExceptions.NotFoundException;
@@ -23,7 +24,7 @@ import com.erpbanking.transactions.portal.PortalExceptions.ValidationException;
  * Erros das rotas de escrita do portal (pagamentos e crédito). Fica separado do
  * GlobalExceptionHandler e tem precedência sobre ele só nos controllers listados.
  */
-@RestControllerAdvice(assignableTypes = {MePaymentsController.class})
+@RestControllerAdvice(assignableTypes = {MePaymentsController.class, MeCreditController.class})
 @Order(Ordered.HIGHEST_PRECEDENCE)
 public class PortalExceptionHandler {
 

@@ -25,6 +25,7 @@ import com.erpbanking.transactions.portal.PortalMetrics;
 import com.erpbanking.transactions.portal.PortalExceptions.NotFoundException;
 import com.erpbanking.transactions.portal.PortalExceptions.SaldoInsuficienteException;
 import com.erpbanking.transactions.portal.payment.PaymentDtos.Comprovante;
+import com.erpbanking.transactions.portal.read.PortalCalculations;
 import com.erpbanking.transactions.portal.payment.PaymentDtos.ContaOrigem;
 import com.erpbanking.transactions.portal.payment.PaymentDtos.PaymentCreated;
 import com.erpbanking.transactions.portal.payment.PaymentDtos.PaymentRequest;
@@ -43,7 +44,6 @@ import com.erpbanking.transactions.service.TransactionService;
 public class PortalPaymentService {
 
     static final ZoneId ZONE = ZoneId.of("America/Sao_Paulo");
-    static final String AGENCIA = "0001";
 
     private final PaymentRepository paymentRepository;
     private final PayableRepository payableRepository;
@@ -134,9 +134,10 @@ public class PortalPaymentService {
         return paymentRepository.findByCustomerIdOrderByIdDesc(customerId).stream().map(PaymentView::of).toList();
     }
 
-    /** Agência fixa e número com 6 dígitos a partir do id da conta. */
+    /** Mesma agência e número (com DV) do {@code GET /me/overview}. */
     static ContaOrigem contaOrigem(Account account) {
-        return new ContaOrigem(account.getId(), AGENCIA, String.format(Locale.ROOT, "%06d", account.getId()));
+        return new ContaOrigem(account.getId(), PortalCalculations.AGENCIA,
+                PortalCalculations.numeroConta(account.getId()));
     }
 
     /** Código de autenticação único, ex.: {@code 9F3A-1C2B-77D0-4E8A-B1C2-D3E4-F5A6-B7C8}. */
