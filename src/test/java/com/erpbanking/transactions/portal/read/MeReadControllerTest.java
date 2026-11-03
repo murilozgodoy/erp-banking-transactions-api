@@ -118,7 +118,7 @@ class MeReadControllerTest {
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$", hasSize(6)))
                 .andExpect(jsonPath("$[0].id").value("payable-" + ids.atrasadaAntiga()))
-                .andExpect(jsonPath("$[0].acao.rota").value("/app/pagamentos"))
+                .andExpect(jsonPath("$[0].acao.rota").value("/app/pagamentos?conta=" + ids.atrasadaAntiga()))
                 .andExpect(jsonPath("$[0].acao.credito.produto").value("CAPITAL_DE_GIRO"))
                 .andExpect(jsonPath("$[1].acao.credito").doesNotExist())
                 .andExpect(jsonPath("$[3].tipo").value("PROPOSTA_CREDITO"))
