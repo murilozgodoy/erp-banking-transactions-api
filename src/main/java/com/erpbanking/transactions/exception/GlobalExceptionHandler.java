@@ -1,5 +1,6 @@
 package com.erpbanking.transactions.exception;
 
+import java.util.LinkedHashMap;
 import java.util.Map;
 
 import org.springframework.http.HttpStatus;
@@ -7,6 +8,9 @@ import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.MethodArgumentNotValidException;
 import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
+
+import com.erpbanking.transactions.portal.OnboardingPendingException;
+import com.erpbanking.transactions.portal.OnboardingUnavailableException;
 
 @RestControllerAdvice
 public class GlobalExceptionHandler {
@@ -45,6 +49,19 @@ public class GlobalExceptionHandler {
     @ExceptionHandler(ApiExceptions.ScoreForbiddenException.class)
     public ResponseEntity<Map<String, String>> scoreForbidden(ApiExceptions.ScoreForbiddenException e) {
         return ResponseEntity.status(HttpStatus.FORBIDDEN).body(Map.of("error", e.getMessage()));
+    }
+
+    @ExceptionHandler(OnboardingPendingException.class)
+    public ResponseEntity<Map<String, Object>> onboardingPending(OnboardingPendingException e) {
+        Map<String, Object> body = new LinkedHashMap<>();
+        body.put("error", "ONBOARDING_PENDENTE");
+        body.put("status", e.getStatus());
+        return ResponseEntity.status(HttpStatus.CONFLICT).body(body);
+    }
+
+    @ExceptionHandler(OnboardingUnavailableException.class)
+    public ResponseEntity<Map<String, String>> onboardingUnavailable(OnboardingUnavailableException e) {
+        return ResponseEntity.status(HttpStatus.SERVICE_UNAVAILABLE).body(Map.of("error", "ONBOARDING_INDISPONIVEL"));
     }
 
     @ExceptionHandler(MethodArgumentNotValidException.class)

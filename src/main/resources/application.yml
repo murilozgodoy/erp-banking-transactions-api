@@ -50,6 +50,11 @@ messaging:
   # Consome customer.created (fila transactions.customer-created) e abre conta corrente com saldo zero.
   auto-open-account: ${AUTO_OPEN_ACCOUNT:false}
 
+# Portal do cliente: o customer do token vem do Onboarding GET /me (token relay).
+app:
+  onboarding:
+    base-url: ${ONBOARDING_API_URL:http://localhost:8081}
+
 credit-score:
   base-url: ${CREDIT_SCORE_API_URL:http://localhost:8082}
   timeout-ms: 5000
