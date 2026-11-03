@@ -19,6 +19,7 @@ public class BusinessMetrics {
     public static final String CREDIT_DECISIONS = "credit.decisions";
     public static final String TRANSACTIONS_CREATED = "transactions.created";
     public static final String EVENTS_PUBLISHED = "events.published";
+    public static final String EVENTS_CONSUMED = "events.consumed";
 
     private final MeterRegistry registry;
 
@@ -44,6 +45,15 @@ public class BusinessMetrics {
     public void eventPublished(String routingKey, String result) {
         Counter.builder(EVENTS_PUBLISHED)
                 .description("Eventos publicados no RabbitMQ (exchange erp.events)")
+                .tag("routing_key", routingKey)
+                .tag("result", result)
+                .register(registry)
+                .increment();
+    }
+
+    public void eventConsumed(String routingKey, String result) {
+        Counter.builder(EVENTS_CONSUMED)
+                .description("Eventos consumidos do RabbitMQ")
                 .tag("routing_key", routingKey)
                 .tag("result", result)
                 .register(registry)

@@ -28,6 +28,25 @@ class AccountServiceTest {
     @InjectMocks AccountService service;
 
     @Test
+    void openForNewCustomerCreatesZeroBalanceAccount() {
+        when(repo.findByCustomerIdOrderByIdDesc(42L)).thenReturn(List.of());
+        when(repo.save(any(Account.class))).thenAnswer(inv -> inv.getArgument(0));
+
+        Optional<Account> opened = service.openForNewCustomer(42L);
+
+        assertThat(opened).isPresent();
+        assertThat(opened.get().getCustomerId()).isEqualTo(42L);
+        assertThat(opened.get().getSaldo()).isEqualByComparingTo("0");
+    }
+
+    @Test
+    void openForNewCustomerIsIdempotent() {
+        when(repo.findByCustomerIdOrderByIdDesc(42L)).thenReturn(List.of(new Account(42L, BigDecimal.TEN)));
+
+        assertThat(service.openForNewCustomer(42L)).isEmpty();
+    }
+
+    @Test
     void createPersistsWithInitialBalance() {
         when(repo.save(any(Account.class))).thenAnswer(inv -> {
             Account a = inv.getArgument(0);

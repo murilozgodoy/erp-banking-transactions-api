@@ -1,8 +1,11 @@
 package com.erpbanking.transactions.messaging;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.mockito.Mockito.mock;
 
 import org.junit.jupiter.api.Test;
+import org.springframework.amqp.core.Binding;
+import org.springframework.amqp.core.Queue;
 import org.springframework.amqp.core.TopicExchange;
 import org.springframework.boot.autoconfigure.AutoConfigurations;
 import org.springframework.boot.autoconfigure.amqp.RabbitAutoConfiguration;
@@ -10,6 +13,7 @@ import org.springframework.boot.autoconfigure.jackson.JacksonAutoConfiguration;
 import org.springframework.boot.test.context.runner.ApplicationContextRunner;
 
 import com.erpbanking.transactions.metrics.BusinessMetrics;
+import com.erpbanking.transactions.service.AccountService;
 
 import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
 
@@ -37,6 +41,29 @@ class MessagingConfigTest {
                     assertThat(exchange.getName()).isEqualTo("erp.events");
                     assertThat(exchange.isDurable()).isTrue();
                 });
+    }
+
+    @Test
+    void autoOpenAccountDeclaresQueueBindingAndListener() {
+        runner.withUserConfiguration(CustomerEventsConfig.class)
+                .withBean(AccountService.class, () -> mock(AccountService.class))
+                .withPropertyValues("spring.rabbitmq.addresses=amqp://erp:erp@rabbitmq:5672/",
+                        "spring.rabbitmq.listener.simple.auto-startup=false", "messaging.auto-open-account=true")
+                .run(ctx -> {
+                    assertThat(ctx).hasSingleBean(CustomerCreatedListener.class);
+                    assertThat(ctx.getBean(Queue.class).getName()).isEqualTo("transactions.customer-created");
+                    Binding binding = ctx.getBean(Binding.class);
+                    assertThat(binding.getExchange()).isEqualTo("erp.events");
+                    assertThat(binding.getRoutingKey()).isEqualTo("customer.created");
+                });
+    }
+
+    @Test
+    void autoOpenAccountOffByDefault() {
+        runner.withUserConfiguration(CustomerEventsConfig.class)
+                .withBean(AccountService.class, () -> mock(AccountService.class))
+                .withPropertyValues("spring.rabbitmq.addresses=amqp://erp:erp@rabbitmq:5672/")
+                .run(ctx -> assertThat(ctx).doesNotHaveBean(CustomerCreatedListener.class));
     }
 
     @Test

@@ -37,6 +37,8 @@ spring:
 messaging:
   enabled: ${MESSAGING_ENABLED:}
   exchange: erp.events
+  # Consome customer.created (fila transactions.customer-created) e abre conta corrente com saldo zero.
+  auto-open-account: ${AUTO_OPEN_ACCOUNT:false}
 
 credit-score:
   base-url: ${CREDIT_SCORE_API_URL:http://localhost:8082}
