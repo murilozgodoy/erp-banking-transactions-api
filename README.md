@@ -29,7 +29,17 @@ docker run --rm -p 8080:8080 --env-file .env transactions-api
 Imagem `eclipse-temurin:21-jre-alpine`, usuário não-root (`app`, uid 10001), `HEALTHCHECK` em `/actuator/health` e
 `JAVA_TOOL_OPTIONS="-XX:MaxRAMPercentage=75 -XX:+UseSerialGC -XX:+ExitOnOutOfMemoryError"` (pode ser sobrescrito).
 O CI publica `ghcr.io/murilozgodoy/erp-banking-transactions-api:latest` e `:<sha>` a cada push na `main` (job `publish`).
-O stack completo (gateway, Postgres, RabbitMQ, Prometheus, Grafana) fica no repo `erp-banking-infra`.
+O stack completo (gateway, Postgres, RabbitMQ, Prometheus, Grafana) fica no repo
+[`GabrielRosa1/erp-banking-infra`](https://github.com/GabrielRosa1/erp-banking-infra).
+
+## Produção (atrás do API Gateway)
+
+Uma EC2 (`3.235.6.136`) roda o `docker compose` do infra. Portas públicas: gateway nginx **8080**, Grafana 8081 e
+Prometheus 8082. O serviço **não** é publicado diretamente: escuta na 8080 interna e é acessado pelo prefixo
+`/transactions` do gateway (prefixo removido; o nginx envia `X-Forwarded-Prefix`). Ex.:
+`http://3.235.6.136:8080/transactions/health`. Outras rotas do gateway: `/onboarding`, `/score` e `/gateway/health`.
+O front (https://erp-banking-front.vercel.app) reescreve `/api/transactions/*` para
+`http://3.235.6.136:8080/transactions/*`.
 
 ## Testes com cobertura
 
@@ -68,6 +78,9 @@ Em produção (compose do infra): `DATABASE_URL=jdbc:postgresql://postgres:5432/
 Resiliência da chamada ao Score (`credit-score.*` no `application.yml`): timeout de conexão de 2 s e de leitura de 5 s,
 2 novas tentativas com backoff exponencial em falhas transitórias, e circuit breaker que abre após 5 falhas seguidas e
 fica 30 s aberto. Com o circuito aberto ou o Score fora do ar, `POST /credits` responde **503** com mensagem clara.
+Propriedades (`CreditScoreProperties`, defaults em código): `connect-timeout-ms` (2000), `read-timeout-ms`
+(usa `timeout-ms`, 5000), `max-retries` (2), `retry-backoff-ms` (200), `circuit-failure-threshold` (5) e
+`circuit-open-duration-ms` (30000).
 
 ## Endpoints
 
@@ -82,12 +95,14 @@ fica 30 s aberto. Com o circuito aberto ou o Score fora do ar, `POST /credits` r
 | GET | `/credits?customerId=` | `read:credits` | Lista pedidos de crédito |
 | POST | `/credits` | `write:credits` | Solicita crédito (consulta o Score) |
 | GET | `/credits/{id}` | `read:credits` | Consulta situação do crédito |
+| GET | `/actuator/health`, `/actuator/info`, `/actuator/prometheus` | pública | Actuator (não exposto pelo gateway) |
+| GET | `/swagger-ui/index.html`, `/v3/api-docs` | pública | Swagger / OpenAPI |
 
 ### Swagger / OpenAPI
 
 Documentação interativa (springdoc) em `/swagger-ui/index.html` e JSON em `/v3/api-docs` — públicos; as rotas
 continuam exigindo o Bearer token (botão **Authorize**). Atrás do API Gateway use
-`http://localhost:8080/transactions/swagger-ui/index.html`: o `X-Forwarded-Prefix` enviado pelo nginx é aplicado pelo
+`http://3.235.6.136:8080/transactions/swagger-ui/index.html` (ou `localhost:8080` com o compose local): o `X-Forwarded-Prefix` enviado pelo nginx é aplicado pelo
 `ForwardedHeaderFilter`, então as URLs geradas já saem com o prefixo `/transactions`.
 
 ## Observabilidade (Prometheus)
@@ -118,7 +133,7 @@ gera log e `events_published_total{result="error"}`.
 |-------------|---------|---------|
 | `credit.decided` | publica | `credit_request_id, customer_id, valor_solicitado, prazo_meses, score, faixa_risco, status, motivo, taxa_juros` |
 | `transaction.created` | publica | `transaction_id, account_id, customer_id, tipo, valor, saldo_apos` |
-| `customer.created` | consome (fila `transactions.customer-created`, com `AUTO_OPEN_ACCOUNT=true`) | `customer_id, nome, cpf, email` |
+| `customer.created` | consome (publicado pelo Onboarding) (fila `transactions.customer-created`, com `AUTO_OPEN_ACCOUNT=true`) | `customer_id, nome, cpf, email` |
 
 O consumo de `customer.created` abre uma conta corrente com saldo zero e é idempotente: se o cliente já tem conta, a
 mensagem é ignorada. Payload sem `customer_id` válido é descartado sem requeue. Fila e binding são declarados pelo
