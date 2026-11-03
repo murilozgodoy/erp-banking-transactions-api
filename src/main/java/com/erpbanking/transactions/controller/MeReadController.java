@@ -16,6 +16,7 @@ import org.springframework.web.bind.annotation.RestController;
 import org.springframework.web.method.annotation.MethodArgumentTypeMismatchException;
 
 import com.erpbanking.transactions.portal.CurrentCustomerResolver;
+import com.erpbanking.transactions.portal.Permissoes;
 import com.erpbanking.transactions.portal.read.MeReadDtos;
 import com.erpbanking.transactions.portal.read.PendenciasService;
 import com.erpbanking.transactions.portal.read.PortalReadService;
@@ -37,7 +38,7 @@ public class MeReadController {
 
     @GetMapping("/overview")
     public MeReadDtos.Overview overview() {
-        return reads.overview(customers.requireCustomerId());
+        return reads.overview(customerId());
     }
 
     @GetMapping("/sales")
@@ -45,7 +46,7 @@ public class MeReadController {
             @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate from,
             @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate to,
             @RequestParam(name = "group_by", required = false) String groupBy) {
-        return reads.sales(customers.requireCustomerId(), from, to, groupBy);
+        return reads.sales(customerId(), from, to, groupBy);
     }
 
     @GetMapping("/receivables")
@@ -53,29 +54,34 @@ public class MeReadController {
             @RequestParam(required = false) String status,
             @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate from,
             @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate to) {
-        return reads.receivables(customers.requireCustomerId(), status, from, to);
+        return reads.receivables(customerId(), status, from, to);
     }
 
     @GetMapping("/payables")
     public MeReadDtos.Payables payables(@RequestParam(required = false) String status) {
-        return reads.payables(customers.requireCustomerId(), status);
+        return reads.payables(customerId(), status);
     }
 
     @GetMapping("/statement")
     public List<MeReadDtos.StatementEntry> statement(
             @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate from,
             @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate to) {
-        return reads.statement(customers.requireCustomerId(), from, to);
+        return reads.statement(customerId(), from, to);
     }
 
     @GetMapping("/inventory")
     public MeReadDtos.Inventory inventory() {
-        return reads.inventory(customers.requireCustomerId());
+        return reads.inventory(customerId());
     }
 
     @GetMapping("/pendencias")
     public List<MeReadDtos.Pendencia> pendencias() {
-        return pendencias.pendencias(customers.requireCustomerId());
+        return pendencias.pendencias(customerId());
+    }
+
+    /** Todas as leituras exigem {@code ver_financeiro}. */
+    private Long customerId() {
+        return customers.requirePermission(Permissoes.VER_FINANCEIRO).customerId();
     }
 
     /** Parâmetro inválido (status, group_by, datas, from > to) → 400 {"error":"PARAMETRO_INVALIDO"}. */

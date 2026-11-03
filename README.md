@@ -105,10 +105,31 @@ Propriedades (`CreditScoreProperties`, defaults em código): `connect-timeout-ms
 ### Portal do cliente ErpIa (`/me`)
 
 GET exige `read:self` e POST exige `write:self`; outros métodos em `/me` são negados. O cliente é o dono do token:
-`CurrentCustomerResolver` chama o Onboarding `GET /me` com o token repassado e guarda o resultado por 5 min por `sub`,
-só quando o status é `APROVADO` (quem está em análise é reconsultado, e o portal libera assim que a aprovação sai).
+`CurrentCustomerResolver` chama o Onboarding `GET /me` com o token repassado e guarda o resultado por **60 s** por
+`sub`, só quando o status é `APROVADO` (quem está em análise é reconsultado, e o portal libera assim que a aprovação
+sai). Por isso uma permissão alterada ou um membro suspenso pelo DONO vale em no máximo 60 s.
 Sem customer ou com status diferente de `APROVADO` a resposta é **409** `{"error":"ONBOARDING_PENDENTE","status":...}`.
 Com o Onboarding fora do ar a resposta é **503** `{"error":"ONBOARDING_INDISPONIVEL"}`.
+
+**Equipe e permissões** (seção 11 do PORTAL_CLIENTE). O `GET /me` do Onboarding traz `membro: {id, nome, email,
+papel, permissoes[], limite_pagamento, status}`; o `sub` pode ser de um funcionário, resolvido para o `customer_id`
+da empresa. Com `membro` nulo (compatibilidade), o token é tratado como **DONO** com todas as permissões e sem limite.
+Membro SUSPENSO (403 `MEMBRO_SUSPENSO` do Onboarding, ou `membro.status` = SUSPENSO) → **403**
+`{"error":"MEMBRO_SUSPENSO"}` em qualquer rota `/me`. Sem a permissão da rota → **403**
+`{"error":"SEM_PERMISSAO","permissao":"<permissão>"}`. As constantes ficam em `portal/Permissoes`
+(`Permissoes.GERENCIAR_ESTOQUE` é a que as futuras rotas de escrita de estoque devem exigir; hoje não há nenhuma).
+
+| Permissão | Rotas |
+|-----------|-------|
+| `ver_financeiro` | todos os `GET /me/*` (overview, sales, receivables, payables, statement, inventory, pendencias, payments, credit/offers, credit/requests) |
+| `pagar` | `POST /me/payments` |
+| `pedir_credito` | `POST /me/credit/simulations`; `POST /me/credit/requests` sem `contratar_credito` cria o pedido `AGUARDANDO_CONTRATACAO` |
+| `contratar_credito` | `POST /me/credit/requests` (decisão na hora) e `POST /me/credit/requests/{id}/confirm` |
+| `gerenciar_estoque` | rotas de estoque que escrevem (nenhuma por enquanto) |
+| `gerenciar_equipe`, `usar_assistente` | usadas pelo Onboarding e pelo Score |
+
+**Auditoria:** `payments` e `credit_requests` ganham `created_by_sub` e `created_by_nome` (o `membro.nome`; nulos nos
+registros antigos). Saem como `created_by_nome` no `GET /me/payments` e como `createdByNome` no `CreditResponse`.
 
 | Método | Rota | Descrição |
 |--------|------|-----------|
@@ -123,7 +144,8 @@ Com o Onboarding fora do ar a resposta é **503** `{"error":"ONBOARDING_INDISPON
 | GET | `/me/payments` | Histórico de pagamentos |
 | GET | `/me/credit/offers` | Limite, taxa a partir de e prazo máximo por produto |
 | POST | `/me/credit/simulations` | Simulação Price com IOF e CET; fica salva por 7 dias |
-| POST | `/me/credit/requests` | `{simulation_id}` ou `{produto, valor, prazo_meses}`: pedido pelo fluxo atual (contrato e `credit.decided`) |
+| POST | `/me/credit/requests` | `{simulation_id}` ou `{produto, valor, prazo_meses}`: pedido pelo fluxo atual (contrato e `credit.decided`). Quem só tem `pedir_credito` recebe o pedido com `status: "AGUARDANDO_CONTRATACAO"`, sem decisão, contrato nem `credit.decided` |
+| POST | `/me/credit/requests/{id}/confirm` | Contrata um pedido `AGUARDANDO_CONTRATACAO`: roda a decisão no mesmo pedido (contrato e `credit.decided`); simulação vencida é refeita com os dados atuais e a pré-aprovada é revalidada contra o limite. 404 `PEDIDO_NAO_ENCONTRADO` (inexistente ou de outra empresa), 422 `PEDIDO_NAO_AGUARDANDO_CONTRATACAO` |
 | GET | `/me/credit/requests` | Propostas e contratos do cliente |
 
 **Precificação** (`portal/credit/CreditPricing`): a faixa vem do Score `GET /me/analysis`. A taxa base mensal é BAIXO
@@ -169,7 +191,7 @@ continuam exigindo o Bearer token (botão **Authorize**). Atrás do API Gateway 
 
 | Métrica | Labels | Quando |
 |---------|--------|--------|
-| `credit_decisions_total` | `status` = APROVADO, REVISAO, NEGADO | decisão de crédito confirmada (após o commit) |
+| `credit_decisions_total` | `status` = APROVADO, REVISAO, NEGADO | decisão de crédito confirmada (após o commit); `AGUARDANDO_CONTRATACAO` não é decisão e não tem série |
 | `transactions_created_total` | `tipo` = CREDIT, DEBIT | transação registrada (após o commit) |
 | `events_published_total` | `routing_key`, `result` = ok, error | publicação no RabbitMQ |
 | `events_consumed_total` | `routing_key`, `result` = ok, duplicate, invalid, error | consumo de `customer.created` e `customer.onboarding_submitted` |

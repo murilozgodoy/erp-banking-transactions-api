@@ -67,12 +67,13 @@ public final class PaymentDtos {
             @JsonProperty("codigo_barras") String codigoBarras,
             PaymentStatus status,
             String autenticacao,
-            @JsonProperty("criado_em") Instant criadoEm) {
+            @JsonProperty("criado_em") Instant criadoEm,
+            @JsonProperty("created_by_nome") String createdByNome) {
 
         public static PaymentView of(Payment p) {
             return new PaymentView(p.getId(), p.getTipo(), p.getValor(), p.getDestinatario(), p.getDescricao(),
                     p.getPayableId(), p.getAgendadoPara(), p.getCodigoBarras(), p.getStatus(),
-                    p.getAutenticacao(), p.getCriadoEm());
+                    p.getAutenticacao(), p.getCriadoEm(), p.getCreatedByNome());
         }
     }
 }

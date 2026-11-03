@@ -42,6 +42,13 @@ public class CreditRequest {
     @Column(name = "criado_em", nullable = false)
     private Instant criadoEm = Instant.now();
 
+    /** Auditoria: {@code sub} e nome de quem pediu pelo portal (nulos nos pedidos antigos e no {@code /credits}). */
+    @Column(name = "created_by_sub")
+    private String createdBySub;
+
+    @Column(name = "created_by_nome")
+    private String createdByNome;
+
     public CreditRequest() {}
 
     public Long getId() { return id; }
@@ -60,4 +67,8 @@ public class CreditRequest {
     public void setMotivo(String motivo) { this.motivo = motivo; }
     public Instant getCriadoEm() { return criadoEm; }
     public void setCriadoEm(Instant criadoEm) { this.criadoEm = criadoEm; }
+    public String getCreatedBySub() { return createdBySub; }
+    public void setCreatedBySub(String createdBySub) { this.createdBySub = createdBySub; }
+    public String getCreatedByNome() { return createdByNome; }
+    public void setCreatedByNome(String createdByNome) { this.createdByNome = createdByNome; }
 }

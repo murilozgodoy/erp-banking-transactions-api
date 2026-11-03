@@ -1,5 +1,6 @@
 package com.erpbanking.transactions.portal.read;
 
+import static org.mockito.ArgumentMatchers.anyString;
 import static org.hamcrest.Matchers.hasSize;
 import static org.hamcrest.Matchers.startsWith;
 import static org.mockito.Mockito.when;
@@ -22,6 +23,7 @@ import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.request.MockHttpServletRequestBuilder;
 import org.springframework.transaction.annotation.Transactional;
 
+import com.erpbanking.transactions.portal.CurrentCustomer;
 import com.erpbanking.transactions.config.SecurityConfig;
 import com.erpbanking.transactions.portal.CurrentCustomerResolver;
 import com.erpbanking.transactions.portal.OnboardingPendingException;
@@ -42,7 +44,7 @@ class MeReadControllerTest {
 
     @BeforeEach
     void setUp() {
-        when(customers.requireCustomerId()).thenReturn(C);
+        when(customers.requirePermission(anyString())).thenReturn(new CurrentCustomer("user", C, "APROVADO"));
         ids = f.cenario(C, LocalDate.now(PortalCalculations.ZONE));
     }
 
@@ -149,7 +151,7 @@ class MeReadControllerTest {
 
     @Test
     void onboardingPendenteVira409() throws Exception {
-        when(customers.requireCustomerId()).thenThrow(new OnboardingPendingException("EM_ANALISE"));
+        when(customers.requirePermission(anyString())).thenThrow(new OnboardingPendingException("EM_ANALISE"));
         mockMvc.perform(me("/me/overview"))
                 .andExpect(status().isConflict())
                 .andExpect(jsonPath("$.error").value("ONBOARDING_PENDENTE"))

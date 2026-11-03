@@ -1,5 +1,6 @@
 package com.erpbanking.transactions.portal.payment;
 
+import static org.mockito.ArgumentMatchers.anyString;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.hamcrest.Matchers.matchesPattern;
 import static org.mockito.Mockito.when;
@@ -25,6 +26,7 @@ import org.springframework.test.context.ActiveProfiles;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.request.MockHttpServletRequestBuilder;
 
+import com.erpbanking.transactions.portal.CurrentCustomer;
 import com.erpbanking.transactions.config.SecurityConfig;
 import com.erpbanking.transactions.domain.Account;
 import com.erpbanking.transactions.domain.Payable;
@@ -54,7 +56,8 @@ class MePaymentsControllerTest {
     @BeforeEach
     void setUp() {
         customerId = IDS.incrementAndGet();
-        when(resolver.requireCustomerId()).thenReturn(customerId);
+        when(resolver.requirePermission(anyString())).thenReturn(new CurrentCustomer("user", customerId, "APROVADO"));
+        when(resolver.require()).thenReturn(new CurrentCustomer("user", customerId, "APROVADO"));
     }
 
     private static MockHttpServletRequestBuilder authed(MockHttpServletRequestBuilder b) {
@@ -215,7 +218,7 @@ class MePaymentsControllerTest {
 
     @Test
     void onboardingPendenteDevolve409() throws Exception {
-        when(resolver.requireCustomerId()).thenThrow(new OnboardingPendingException("EM_ANALISE"));
+        when(resolver.requirePermission(anyString())).thenThrow(new OnboardingPendingException("EM_ANALISE"));
         mockMvc.perform(authed(get("/me/payments")))
                 .andExpect(status().isConflict())
                 .andExpect(jsonPath("$.error").value("ONBOARDING_PENDENTE"));

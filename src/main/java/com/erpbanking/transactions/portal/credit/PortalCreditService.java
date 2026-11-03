@@ -11,12 +11,14 @@ import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Optional;
 import java.util.Set;
+import java.util.function.Function;
 import java.util.stream.Collectors;
 
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import com.erpbanking.transactions.domain.CreditRequest;
 import com.erpbanking.transactions.domain.CreditSimulation;
 import com.erpbanking.transactions.domain.CreditStatus;
 import com.erpbanking.transactions.domain.InventoryItem;
@@ -24,6 +26,9 @@ import com.erpbanking.transactions.domain.Receivable;
 import com.erpbanking.transactions.domain.ReceivableStatus;
 import com.erpbanking.transactions.domain.Sale;
 import com.erpbanking.transactions.dto.CreditResponseDto;
+import com.erpbanking.transactions.portal.CurrentCustomer;
+import com.erpbanking.transactions.portal.PermissionDeniedException;
+import com.erpbanking.transactions.portal.Permissoes;
 import com.erpbanking.transactions.portal.PortalExceptions.BusinessRuleException;
 import com.erpbanking.transactions.portal.PortalExceptions.NotFoundException;
 import com.erpbanking.transactions.portal.PortalExceptions.ValidationException;
@@ -36,6 +41,7 @@ import com.erpbanking.transactions.portal.credit.CreditDtos.SimulationResponse;
 import com.erpbanking.transactions.portal.credit.CreditPricing.Aprovacao;
 import com.erpbanking.transactions.portal.credit.CreditPricing.Quote;
 import com.erpbanking.transactions.portal.credit.ScoreAnalysisClient.ScoreAnalysis;
+import com.erpbanking.transactions.repository.CreditRequestRepository;
 import com.erpbanking.transactions.repository.CreditSimulationRepository;
 import com.erpbanking.transactions.repository.InventoryItemRepository;
 import com.erpbanking.transactions.repository.ReceivableRepository;
@@ -57,25 +63,30 @@ public class PortalCreditService {
     private final InventoryItemRepository inventory;
     private final SaleRepository sales;
     private final CreditService creditService;
+    private final CreditRequestRepository creditRequests;
     private final PortalMetrics metrics;
     private final Clock clock;
 
     @Autowired
     public PortalCreditService(ScoreAnalysisClient scoreAnalysis, CreditSimulationRepository simulations,
                                ReceivableRepository receivables, InventoryItemRepository inventory,
-                               SaleRepository sales, CreditService creditService, PortalMetrics metrics) {
-        this(scoreAnalysis, simulations, receivables, inventory, sales, creditService, metrics, Clock.system(ZONE));
+                               SaleRepository sales, CreditService creditService,
+                               CreditRequestRepository creditRequests, PortalMetrics metrics) {
+        this(scoreAnalysis, simulations, receivables, inventory, sales, creditService, creditRequests, metrics,
+                Clock.system(ZONE));
     }
 
     PortalCreditService(ScoreAnalysisClient scoreAnalysis, CreditSimulationRepository simulations,
                         ReceivableRepository receivables, InventoryItemRepository inventory,
-                        SaleRepository sales, CreditService creditService, PortalMetrics metrics, Clock clock) {
+                        SaleRepository sales, CreditService creditService, CreditRequestRepository creditRequests,
+                        PortalMetrics metrics, Clock clock) {
         this.scoreAnalysis = scoreAnalysis;
         this.simulations = simulations;
         this.receivables = receivables;
         this.inventory = inventory;
         this.sales = sales;
         this.creditService = creditService;
+        this.creditRequests = creditRequests;
         this.metrics = metrics;
         this.clock = clock;
     }
@@ -107,9 +118,18 @@ public class PortalCreditService {
      * Pedido a partir de uma simulação ({@code simulation_id}) ou de produto, valor e prazo. A simulação é
      * travada ({@code SELECT ... FOR UPDATE}) para virar no máximo um pedido; na antecipação, os recebíveis do
      * cliente também, e os usados ficam ANTECIPADO quando o pedido é aprovado.
+     *
+     * <p>Quem tem {@code contratar_credito} recebe a decisão na hora (fluxo de crédito e {@code credit.decided});
+     * quem só tem {@code pedir_credito} cria o pedido AGUARDANDO_CONTRATACAO, sem decisão, para alguém com
+     * {@code contratar_credito} confirmar em {@link #confirm}. Sem nenhuma das duas: 403 SEM_PERMISSAO.
      */
     @Transactional
-    public CreditResponseDto request(Long customerId, PortalCreditRequest req) {
+    public CreditResponseDto request(CurrentCustomer who, PortalCreditRequest req) {
+        Long customerId = who.customerId();
+        boolean contrata = who.tem(Permissoes.CONTRATAR_CREDITO);
+        if (!contrata && !who.tem(Permissoes.PEDIR_CREDITO)) {
+            throw new PermissionDeniedException(Permissoes.CONTRATAR_CREDITO);
+        }
         CreditSimulation sim;
         List<Receivable> travados = List.of();
         if (req.simulationId() != null) {
@@ -126,20 +146,71 @@ public class PortalCreditService {
                 throw new BusinessRuleException("SIMULACAO_EXPIRADA",
                         "A simulação " + sim.getId() + " venceu em " + sim.getValidade());
             }
-            if (antecipacao(sim.getProduto())) {
-                travados = receivables.findByCustomerIdForUpdate(customerId);
+            if (contrata) {
+                if (antecipacao(sim.getProduto())) {
+                    travados = receivables.findByCustomerIdForUpdate(customerId);
+                }
+                revalidate(customerId, sim, today);
             }
-            revalidate(customerId, sim, today);
         } else {
             if (req.produto() == null || req.valor() == null || req.prazoMeses() == null) {
                 throw new ValidationException("Informe simulation_id ou produto, valor e prazo_meses");
             }
-            if (req.produto() == CreditProduct.ANTECIPACAO_RECEBIVEIS) {
+            if (contrata && req.produto() == CreditProduct.ANTECIPACAO_RECEBIVEIS) {
                 travados = receivables.findByCustomerIdForUpdate(customerId);
             }
             sim = createSimulation(customerId, req.produto(), req.valor(), req.prazoMeses(), null);
         }
 
+        CreditResponseDto resp;
+        if (contrata) {
+            resp = decide(sim, travados, creditService::solicitarPrecificado, who);
+        } else {
+            resp = creditService.registrarAguardando(customerId, sim.getValor(), sim.getPrazoMeses(), who.sub(),
+                    who.nome());
+            sim.setCreditRequestId(resp.id());
+            simulations.save(sim);
+        }
+        metrics.portalRequest(sim.getProduto());
+        return resp;
+    }
+
+    /**
+     * Confirma (contrata) um pedido AGUARDANDO_CONTRATACAO do cliente: roda a decisão de crédito no mesmo pedido
+     * (contrato e {@code credit.decided}). O pedido e a simulação são travados; uma simulação vencida é refeita com
+     * os dados atuais e uma pré-aprovada é revalidada contra o limite atual, como num pedido por simulation_id.
+     */
+    @Transactional
+    public CreditResponseDto confirm(CurrentCustomer who, Long creditRequestId) {
+        Long customerId = who.customerId();
+        CreditRequest cr = creditRequests.findByIdForUpdate(creditRequestId)
+                .filter(r -> customerId.equals(r.getCustomerId()))
+                .orElseThrow(() -> new NotFoundException("PEDIDO_NAO_ENCONTRADO",
+                        "Pedido de crédito " + creditRequestId + " não encontrado"));
+        if (cr.getStatus() != CreditStatus.AGUARDANDO_CONTRATACAO) {
+            throw new BusinessRuleException("PEDIDO_NAO_AGUARDANDO_CONTRATACAO",
+                    "O pedido " + creditRequestId + " está " + cr.getStatus() + " e não aguarda contratação");
+        }
+        CreditSimulation sim = simulations.findByCreditRequestIdForUpdate(creditRequestId).stream().findFirst()
+                .orElseThrow(() -> new IllegalStateException("Pedido " + creditRequestId + " sem simulação"));
+        LocalDate today = LocalDate.now(clock);
+        List<Receivable> travados = antecipacao(sim.getProduto())
+                ? receivables.findByCustomerIdForUpdate(customerId) : List.of();
+        if (sim.getValidade().isBefore(today)) {
+            CreditSimulation vencida = sim;
+            vencida.setCreditRequestId(null);
+            simulations.save(vencida);
+            sim = createSimulation(customerId, CreditProduct.valueOf(vencida.getProduto()), vencida.getValor(),
+                    vencida.getPrazoMeses(), selectedIds(vencida));
+        } else {
+            revalidate(customerId, sim, today);
+        }
+        return decide(sim, travados, d -> creditService.confirmarPrecificado(cr, d), who);
+    }
+
+    /** Decide pela aprovação da simulação, liga a simulação ao pedido e antecipa os recebíveis se aprovado. */
+    private CreditResponseDto decide(CreditSimulation sim, List<Receivable> travados,
+                                     Function<PricedDecision, CreditResponseDto> registrar, CurrentCustomer who) {
         Aprovacao aprovacao = Aprovacao.valueOf(sim.getAprovacao());
         CreditStatus status = switch (aprovacao) {
             case PRE_APROVADO -> CreditStatus.APROVADO;
@@ -152,14 +223,14 @@ public class PortalCreditService {
             case NEGADO -> "Negado — risco " + sim.getFaixaRisco();
         };
         BigDecimal taxaFracao = sim.getTaxaMensal().divide(BigDecimal.valueOf(100), 4, RoundingMode.HALF_UP);
-        CreditResponseDto resp = creditService.solicitarPrecificado(new PricedDecision(customerId, sim.getValor(),
-                sim.getPrazoMeses(), sim.getScore(), sim.getFaixaRisco(), status, motivo, taxaFracao));
+        CreditResponseDto resp = registrar.apply(new PricedDecision(sim.getCustomerId(), sim.getValor(),
+                sim.getPrazoMeses(), sim.getScore(), sim.getFaixaRisco(), status, motivo, taxaFracao, who.sub(),
+                who.nome()));
         sim.setCreditRequestId(resp.id());
         simulations.save(sim);
         if (status == CreditStatus.APROVADO && antecipacao(sim.getProduto())) {
             antecipar(sim, travados);
         }
-        metrics.portalRequest(sim.getProduto());
         return resp;
     }
 

@@ -3,6 +3,7 @@ package com.erpbanking.transactions.portal;
 import java.time.Clock;
 import java.time.Duration;
 import java.time.Instant;
+import java.util.HashSet;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
 
@@ -12,14 +13,18 @@ import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.stereotype.Component;
 
 /**
- * Descobre o {@code customer_id} do dono do token pelo Onboarding {@code GET /me} (token relay).
- * Cache em memória de 5 min por {@code sub}, só para clientes APROVADO: quem ainda está em análise
- * consulta de novo a cada chamada, para o portal liberar assim que a aprovação sair.
+ * Descobre o {@code customer_id} e o membro da empresa do token pelo Onboarding {@code GET /me} (token relay).
+ * Cache em memória de 60 s por {@code sub}, só para clientes APROVADO: quem ainda está em análise consulta de novo
+ * a cada chamada, para o portal liberar assim que a aprovação sair. Uma permissão alterada (ou um membro suspenso)
+ * pelo DONO vale em no máximo 60 s.
+ *
+ * <p>Sem {@code membro} na resposta (Onboarding ainda sem a equipe), o dono do token é tratado como DONO, com
+ * todas as permissões e sem limite de pagamento.
  */
 @Component
 public class CurrentCustomerResolver {
 
-    static final Duration TTL = Duration.ofMinutes(5);
+    static final Duration TTL = Duration.ofSeconds(60);
 
     private record Entry(CurrentCustomer customer, Instant expiresAt) {}
 
@@ -51,6 +56,18 @@ public class CurrentCustomerResolver {
         return require().customerId();
     }
 
+    /**
+     * Cliente aprovado cujo membro tem a permissão; senão {@link PermissionDeniedException}
+     * (403 {@code SEM_PERMISSAO}).
+     */
+    public CurrentCustomer requirePermission(String permissao) {
+        CurrentCustomer customer = require();
+        if (!customer.tem(permissao)) {
+            throw new PermissionDeniedException(permissao);
+        }
+        return customer;
+    }
+
     public CurrentCustomer resolve() {
         String sub = currentSub();
         Instant now = clock.instant();
@@ -58,15 +75,40 @@ public class CurrentCustomerResolver {
         if (cached != null && cached.expiresAt().isAfter(now)) {
             return cached.customer();
         }
-        OnboardingClient.MeResponse me = onboarding.me();
+        OnboardingClient.MeResponse me;
+        try {
+            me = onboarding.me();
+        } catch (MemberSuspendedException e) {
+            cache.remove(sub);
+            throw e;
+        }
         String status = me.onboardingStatus() == null ? "NAO_INICIADO" : me.onboardingStatus();
-        CurrentCustomer customer = new CurrentCustomer(sub, me.customerId(), status);
+        Membro membro = toMembro(me);
+        if (Membro.SUSPENSO.equals(membro.status())) {
+            cache.remove(sub);
+            throw new MemberSuspendedException();
+        }
+        CurrentCustomer customer = new CurrentCustomer(sub, me.customerId(), status, membro);
         if (customer.aprovado()) {
             cache.put(sub, new Entry(customer, now.plus(TTL)));
         } else {
             cache.remove(sub);
         }
         return customer;
+    }
+
+    private static Membro toMembro(OnboardingClient.MeResponse me) {
+        OnboardingClient.MembroResponse m = me.membro();
+        if (m == null) {
+            return Membro.donoImplicito(blankToNull(me.nome()));
+        }
+        String nome = blankToNull(m.nome()) != null ? m.nome().trim() : blankToNull(me.nome());
+        return new Membro(m.id(), m.papel(), m.permissoes() == null ? null : new HashSet<>(m.permissoes()),
+                m.limitePagamento(), m.status(), nome);
+    }
+
+    private static String blankToNull(String s) {
+        return s == null || s.isBlank() ? null : s.trim();
     }
 
     private static String currentSub() {
