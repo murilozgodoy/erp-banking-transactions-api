@@ -49,4 +49,32 @@ public final class PortalExceptions {
             return faltam;
         }
     }
+
+    /** Campo do corpo inválido por uma regra que depende de outro campo (ex.: tipo): 400 com {@code campos}. */
+    public static class FieldValidationException extends PortalException {
+        private final String campo;
+
+        public FieldValidationException(String campo, String message) {
+            super("validation_failed", message);
+            this.campo = campo;
+        }
+
+        public String getCampo() {
+            return campo;
+        }
+    }
+
+    /** SAIDA maior que o estoque do item: 422 com quanto há disponível. */
+    public static class EstoqueInsuficienteException extends PortalException {
+        private final int disponivel;
+
+        public EstoqueInsuficienteException(int disponivel) {
+            super("ESTOQUE_INSUFICIENTE", "Estoque insuficiente: disponível " + disponivel);
+            this.disponivel = disponivel;
+        }
+
+        public int getDisponivel() {
+            return disponivel;
+        }
+    }
 }

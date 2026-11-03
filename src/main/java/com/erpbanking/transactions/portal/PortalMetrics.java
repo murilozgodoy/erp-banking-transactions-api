@@ -4,6 +4,7 @@ import java.math.BigDecimal;
 
 import org.springframework.stereotype.Component;
 
+import com.erpbanking.transactions.domain.InventoryMovementType;
 import com.erpbanking.transactions.domain.PaymentType;
 
 import io.micrometer.core.instrument.Counter;
@@ -12,7 +13,8 @@ import io.micrometer.core.instrument.MeterRegistry;
 /**
  * Métricas do portal do cliente em /actuator/prometheus (contrato com o Grafana):
  * {@code payments_total{tipo,status}}, {@code payments_amount_brl_total{tipo}},
- * {@code credit_simulations_total{produto,aprovacao}} e {@code credit_portal_requests_total{produto}}.
+ * {@code credit_simulations_total{produto,aprovacao}}, {@code credit_portal_requests_total{produto}} e
+ * {@code inventory_movements_total{tipo}}.
  * Todas as séries são registradas com zero no startup.
  */
 @Component
@@ -22,6 +24,7 @@ public class PortalMetrics {
     public static final String PAYMENTS_AMOUNT = "payments.amount.brl";
     public static final String CREDIT_SIMULATIONS = "credit.simulations";
     public static final String CREDIT_PORTAL_REQUESTS = "credit.portal.requests";
+    public static final String INVENTORY_MOVEMENTS = "inventory.movements";
 
     public static final String EFETIVADO = "EFETIVADO";
     public static final String AGENDADO = "AGENDADO";
@@ -50,6 +53,19 @@ public class PortalMetrics {
             }
             requests(produto);
         }
+        for (InventoryMovementType tipo : InventoryMovementType.values()) {
+            movements(tipo);
+        }
+    }
+
+    /** Movimentação de estoque gravada ({@code POST /me/inventory/{id}/movements}). */
+    public void inventoryMovement(InventoryMovementType tipo) {
+        movements(tipo).increment();
+    }
+
+    private Counter movements(InventoryMovementType tipo) {
+        return Counter.builder(INVENTORY_MOVEMENTS).description("Movimentações de estoque pelo portal")
+                .tag("tipo", tipo.name()).register(registry);
     }
 
     /**

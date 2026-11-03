@@ -117,16 +117,16 @@ da empresa. Com `membro` nulo (compatibilidade), o token é tratado como **DONO*
 Membro SUSPENSO (403 `MEMBRO_SUSPENSO` do Onboarding, ou `membro.status` = SUSPENSO) → **403**
 `{"error":"MEMBRO_SUSPENSO"}` em qualquer rota `/me`. Sem a permissão da rota → **403**
 `{"error":"SEM_PERMISSAO","permissao":"<permissão>"}`. As constantes ficam em `portal/Permissoes`
-(`Permissoes.GERENCIAR_ESTOQUE` é a que as futuras rotas de escrita de estoque devem exigir; hoje não há nenhuma).
+(`Permissoes.GERENCIAR_ESTOQUE` protege a escrita de estoque: `POST /me/inventory/{id}/movements`).
 
 | Permissão | Rotas |
 |-----------|-------|
-| `ver_financeiro` | todos os `GET /me/*` (overview, sales, receivables, payables, statement, inventory, pendencias, payments, credit/offers, credit/requests) |
+| `ver_financeiro` | todos os `GET /me/*` (overview, sales, receivables, payables, statement, inventory, inventory/{id}/movements, pendencias, payments, credit/offers, credit/requests) |
 | `pagar` | `POST /me/payments` (acima do `limite_pagamento` do membro, fica `PENDENTE_APROVACAO`) |
 | `aprovar_pagamentos` | `GET /me/payments/pending`, `POST /me/payments/{id}/approve` e `/reject` (nunca pelo autor) |
 | `pedir_credito` | `POST /me/credit/simulations`; `POST /me/credit/requests` sem `contratar_credito` cria o pedido `AGUARDANDO_CONTRATACAO` |
 | `contratar_credito` | `POST /me/credit/requests` (decisão na hora) e `POST /me/credit/requests/{id}/confirm` |
-| `gerenciar_estoque` | rotas de estoque que escrevem (nenhuma por enquanto) |
+| `gerenciar_estoque` | `POST /me/inventory/{id}/movements` (entrada, saída e ajuste de estoque) |
 | `gerenciar_equipe`, `usar_assistente` | usadas pelo Onboarding e pelo Score |
 
 **Auditoria:** `payments` e `credit_requests` ganham `created_by_sub` e `created_by_nome` (o `membro.nome`; nulos nos
@@ -155,6 +155,8 @@ precisa só de `aprovar_pagamentos` (o limite de pagamento dele não se aplica �
 | GET | `/me/payables?status=` | Contas a pagar (ABERTO vencido sai como ATRASADO), total aberto, atrasado e próximos 7 dias |
 | GET | `/me/statement?from=&to=` | Extrato da conta com `saldo_apos`, mais recente primeiro (padrão: 30 dias) |
 | GET | `/me/inventory` | Itens com cobertura em dias, valor total, valor parado (giro > 90 dias) e itens abaixo do mínimo |
+| POST | `/me/inventory/{id}/movements` | `{tipo, quantidade, motivo?, custo_unitario?}`: movimenta o item (veja **Movimentação de estoque**) e devolve 201 `{movimento, item}` |
+| GET | `/me/inventory/{id}/movements` | Histórico do item, mais recente primeiro (no máximo 100) |
 | GET | `/me/pendencias` | Contas atrasadas, vencendo hoje, saldo insuficiente, propostas em revisão e estoque baixo ou parado, com ação sugerida (e crédito, quando cabe) |
 | POST | `/me/payments` | PIX, boleto ou TED: debita na hora (422 `SALDO_INSUFICIENTE` com `faltam`) ou agenda (`agendado_para` futuro; no passado é 400), e devolve o comprovante. Com `payable_id`, o valor tem de ser o da conta (422 `VALOR_DIVERGENTE`) e ela não pode estar paga ou agendada (422 `CONTA_JA_PAGA` / `CONTA_JA_AGENDADA`) |
 | GET | `/me/payments` | Histórico de pagamentos (com autoria, aprovação e rejeição) |
@@ -188,6 +190,41 @@ antecipação aprovada, os recebíveis usados (os selecionados, ou os PREVISTO d
 valor) passam a `ANTECIPADO` e saem do limite. Uma simulação vira no máximo um pedido, e uma `PRE_APROVADO` é
 revalidada contra o limite atual no momento do pedido.
 
+**Movimentação de estoque** (`portal/inventory`). `POST /me/inventory/{id}/movements` exige `gerenciar_estoque`;
+corpo `{tipo, quantidade, motivo?, custo_unitario?}`:
+
+- `tipo`: `ENTRADA` (soma), `SAIDA` (subtrai) ou `AJUSTE` (inventário: `quantidade` é a **nova quantidade final**).
+- `quantidade`: inteiro; em ENTRADA/SAIDA, > 0 e ≤ 1.000.000; em AJUSTE, ≥ 0 e ≤ 1.000.000.
+- `custo_unitario`: só em ENTRADA, > 0 e com até 2 casas. Recalcula o custo do item pela média ponderada
+  (qtdAnterior·custoAnterior + q·custoNovo) / (qtdAnterior + q), HALF_EVEN com 2 casas. Sem ele, o custo não muda.
+- `motivo`: opcional, até 200 caracteres.
+
+O item é travado (`SELECT ... FOR UPDATE`) antes de ler a quantidade, então movimentações concorrentes são
+serializadas e o estoque nunca fica negativo. Cada movimentação grava `inventory_movements` (`quantidade`,
+`quantidade_anterior`, `quantidade_final`, `custo_unitario`, `motivo`, `created_by_sub`, `created_by_nome` = `membro.nome`,
+`created_at`; índice em `customer_id, item_id, created_at`). Resposta 201:
+
+```json
+{"movimento": {"id": 1, "item_id": 42, "tipo": "ENTRADA", "quantidade": 30, "quantidade_anterior": 10,
+               "quantidade_final": 40, "custo_unitario": 7.00, "motivo": "NF 123", "created_by_nome": "Olga",
+               "created_at": "2026-11-03T15:04:05.123Z"},
+ "item": {"id": 42, "sku": "PAR-001", "nome": "Parafuso", "quantidade": 40, "minimo": 5, "custo_unitario": 6.50,
+          "preco_venda": 12.90, "giro_dias": 20, "ultima_venda": null, "cobertura_dias": 20,
+          "abaixo_minimo": false, "parado": false}}
+```
+
+`item` tem o mesmo formato de `GET /me/inventory` `itens[]`, já recalculado. Os indicadores (`GET /me/inventory`,
+`estoque_valor` e `pendencias_count` do `/me/overview` e as pendências `ESTOQUE_BAIXO`/`ESTOQUE_PARADO`) são
+calculados na hora a partir do item, então refletem a movimentação imediatamente: `ESTOQUE_BAIXO` some quando
+`quantidade ≥ minimo`. `GET /me/inventory/{id}/movements` (`ver_financeiro`) devolve `[movimento…]`.
+
+| Status | Corpo | Quando |
+|--------|-------|--------|
+| 400 | `{"error":"validation_failed","message":...,"campos":{"quantidade":...}}` | quantidade 0 (fora de AJUSTE), negativa, fracionária ou acima de 1.000.000; `custo_unitario` fora de ENTRADA, ≤ 0 ou com mais de 2 casas; `tipo` ausente ou inválido; `motivo` > 200 |
+| 403 | `{"error":"SEM_PERMISSAO","permissao":"gerenciar_estoque"}` | membro sem a permissão (ex.: LEITURA) |
+| 404 | `{"error":"ITEM_NAO_ENCONTRADO","message":...}` | item inexistente ou de outra empresa (mesmo corpo; nada é gravado) |
+| 422 | `{"error":"ESTOQUE_INSUFICIENTE","message":...,"disponivel":3}` | SAIDA maior que a quantidade do item |
+
 **Pagamentos agendados**: um job (`portal.payments.scheduler-delay-ms`, padrão 5 min; desligável com
 `PAYMENTS_SCHEDULER_ENABLED=false`) efetiva os agendados com `agendado_para` até hoje (America/Sao_Paulo) quando há
 saldo; sem saldo, o pagamento continua `AGENDADO` e é tentado de novo na próxima rodada.
@@ -219,6 +256,7 @@ continuam exigindo o Bearer token (botão **Authorize**). Atrás do API Gateway 
 | `payments_amount_brl_total` | `tipo` | valor dos pagamentos efetivados |
 | `credit_simulations_total` | `produto`, `aprovacao` = PRE_APROVADO, ANALISE, NEGADO | simulação no portal |
 | `credit_portal_requests_total` | `produto` | pedido de crédito pelo portal |
+| `inventory_movements_total` | `tipo` = ENTRADA, SAIDA, AJUSTE | movimentação de estoque gravada pelo portal |
 
 Usa `micrometer-registry-prometheus-simpleclient`: o cliente Prometheus 1.x remove o sufixo `_created` dos nomes e
 `transactions_created_total` viraria `transactions_total`.
