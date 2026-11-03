@@ -66,6 +66,7 @@ Em produção, defina-as no ambiente do processo/container (têm precedência so
 | `AUTH0_AUDIENCE` | — (obrigatória) | Identifier da API no Auth0: `https://erp-banking-api` |
 | `CORS_ORIGINS` | `http://localhost:5173` | Origens do frontend, separadas por vírgula |
 | `CREDIT_SCORE_API_URL` | `http://localhost:8082` | URL do Score |
+| `ONBOARDING_API_URL` | `http://localhost:8081` | URL do Onboarding (`GET /me` resolve o cliente do portal) |
 | `DATABASE_URL` | `jdbc:h2:mem:transactions;...` | JDBC URL |
 | `DATABASE_USER` | sa | usuário |
 | `DATABASE_PASSWORD` | (vazio) | senha |
@@ -101,6 +102,46 @@ Propriedades (`CreditScoreProperties`, defaults em código): `connect-timeout-ms
 | GET | `/actuator/health`, `/actuator/info`, `/actuator/prometheus` | pública | Actuator (não exposto pelo gateway) |
 | GET | `/swagger-ui/index.html`, `/v3/api-docs` | pública | Swagger / OpenAPI |
 
+### Portal do cliente ErpIa (`/me`)
+
+GET exige `read:self` e POST exige `write:self`; outros métodos em `/me` são negados. O cliente é o dono do token:
+`CurrentCustomerResolver` chama o Onboarding `GET /me` com o token repassado e guarda o resultado por 5 min por `sub`,
+só quando o status é `APROVADO` (quem está em análise é reconsultado, e o portal libera assim que a aprovação sai).
+Sem customer ou com status diferente de `APROVADO` a resposta é **409** `{"error":"ONBOARDING_PENDENTE","status":...}`.
+Com o Onboarding fora do ar a resposta é **503** `{"error":"ONBOARDING_INDISPONIVEL"}`.
+
+| Método | Rota | Descrição |
+|--------|------|-----------|
+| GET | `/me/overview` | Saldo, conta (agência 0001, número com DV), KPIs de 30 dias, recebíveis de 90 dias, contas a pagar, estoque, pendências e fluxo de caixa projetado de 60 dias |
+| GET | `/me/sales?from=&to=&group_by=day\|week\|month` | Série, formas de pagamento, canais, top produtos, total e ticket médio (padrão: 30 dias, por dia) |
+| GET | `/me/receivables?status=&from=&to=` | Agenda de recebíveis, total previsto e soma por semana |
+| GET | `/me/payables?status=` | Contas a pagar (ABERTO vencido sai como ATRASADO), total aberto, atrasado e próximos 7 dias |
+| GET | `/me/statement?from=&to=` | Extrato da conta com `saldo_apos`, mais recente primeiro (padrão: 30 dias) |
+| GET | `/me/inventory` | Itens com cobertura em dias, valor total, valor parado (giro > 90 dias) e itens abaixo do mínimo |
+| GET | `/me/pendencias` | Contas atrasadas, vencendo hoje, saldo insuficiente, propostas em revisão e estoque baixo ou parado, com ação sugerida (e crédito, quando cabe) |
+| POST | `/me/payments` | PIX, boleto ou TED: debita na hora (422 `SALDO_INSUFICIENTE` com `faltam`) ou agenda (`agendado_para` futuro), e devolve o comprovante |
+| GET | `/me/payments` | Histórico de pagamentos |
+| GET | `/me/credit/offers` | Limite, taxa a partir de e prazo máximo por produto |
+| POST | `/me/credit/simulations` | Simulação Price com IOF e CET; fica salva por 7 dias |
+| POST | `/me/credit/requests` | `{simulation_id}` ou `{produto, valor, prazo_meses}`: pedido pelo fluxo atual (contrato e `credit.decided`) |
+| GET | `/me/credit/requests` | Propostas e contratos do cliente |
+
+**Precificação** (`portal/credit/CreditPricing`): a faixa vem do Score `GET /me/analysis`. A taxa base mensal é BAIXO
+1,69%, MEDIO 2,49% ou ALTO 3,49%; sem análise, a taxa é a de ALTO; MUITO_ALTO é negado. Ajuste por produto:
+
+| Produto | Ajuste | Limite | Prazo máximo |
+|---------|--------|--------|--------------|
+| `ANTECIPACAO_RECEBIVEIS` | −0,4 pp | 80% dos recebíveis selecionados (ou todos os PREVISTO) | 6 meses |
+| `FINANCIAMENTO_ESTOQUE` | −0,2 pp | 60% do valor de estoque | 18 meses |
+| `CAPITAL_DE_GIRO` e `CONSOLIDACAO_DIVIDAS` | 0 | 1× a receita dos últimos 30 dias | 24 meses |
+| `ALAVANCAGEM` | +0,3 pp | 3× a receita dos últimos 30 dias | 36 meses |
+
+Parcelas iguais (Price). IOF: 0,38% + 0,0082% ao dia sobre cada amortização, com no máximo 365 dias. O valor líquido é
+o valor menos o IOF, e o CET anual é (1 + i)^12 − 1, com i sendo a TIR mensal do fluxo líquido, ou seja, incluindo o
+IOF. Taxas e CET saem em **percentual** (`2.4900` = 2,49% a.m.). A aprovação é `PRE_APROVADO` para faixa BAIXO ou
+MEDIO dentro do limite, `NEGADO` para MUITO_ALTO e `ANALISE` nos demais casos. No pedido, `PRE_APROVADO` vira
+`APROVADO` com contrato na taxa da simulação, e `ANALISE` vira `REVISAO`.
+
 ### Swagger / OpenAPI
 
 Documentação interativa (springdoc) em `/swagger-ui/index.html` e JSON em `/v3/api-docs` — públicos; as rotas
@@ -122,6 +163,10 @@ continuam exigindo o Bearer token (botão **Authorize**). Atrás do API Gateway 
 | `events_published_total` | `routing_key`, `result` = ok, error | publicação no RabbitMQ |
 | `events_consumed_total` | `routing_key`, `result` = ok, duplicate, invalid, error | consumo de `customer.created` e `customer.onboarding_submitted` |
 | `seeder_runs_total` | `result` = ok, skipped, error | seeder do portal (skipped = cliente já tinha dados) |
+| `payments_total` | `tipo` = PIX, BOLETO, TED; `status` = EFETIVADO, AGENDADO, RECUSADO | pagamento pelo portal (RECUSADO = saldo insuficiente) |
+| `payments_amount_brl_total` | `tipo` | valor dos pagamentos efetivados |
+| `credit_simulations_total` | `produto`, `aprovacao` = PRE_APROVADO, ANALISE, NEGADO | simulação no portal |
+| `credit_portal_requests_total` | `produto` | pedido de crédito pelo portal |
 
 Usa `micrometer-registry-prometheus-simpleclient`: o cliente Prometheus 1.x remove o sufixo `_created` dos nomes e
 `transactions_created_total` viraria `transactions_total`.
@@ -156,7 +201,9 @@ Rabbit e no-op escolhidas por `MessagingEnabledCondition`, e `CustomerCreatedLis
 ## Padrões de projeto aplicados
 
 - **Singleton**: `RestClientConfig` provê o `RestTemplate` como bean singleton do Spring (`@Bean`)
-- **Repository (Spring Data JPA)**: `AccountRepository`, `TransactionRepository`, `CreditRequestRepository`, `ContractRepository`
+- **Repository (Spring Data JPA)**: `AccountRepository`, `TransactionRepository`, `CreditRequestRepository`,
+  `ContractRepository` e os do portal (`SaleRepository`, `ReceivableRepository`, `PayableRepository`,
+  `InventoryItemRepository`, `PaymentRepository`)
 - **Observer**: eventos de domínio do Spring (`ApplicationEventPublisher` + `@TransactionalEventListener`) separam a
   regra de negócio das métricas e da mensageria
 - **Strategy**: `EventPublisher` (RabbitMQ ou no-op), escolhido por configuração
