@@ -15,6 +15,7 @@ import org.springframework.boot.test.context.runner.ApplicationContextRunner;
 import com.erpbanking.transactions.metrics.BusinessMetrics;
 import com.erpbanking.transactions.service.AccountService;
 
+import io.micrometer.core.instrument.MeterRegistry;
 import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
 
 class MessagingConfigTest {
@@ -22,7 +23,8 @@ class MessagingConfigTest {
     private final ApplicationContextRunner runner = new ApplicationContextRunner()
             .withConfiguration(AutoConfigurations.of(RabbitAutoConfiguration.class, JacksonAutoConfiguration.class))
             .withUserConfiguration(MessagingConfig.class)
-            .withBean(BusinessMetrics.class, () -> new BusinessMetrics(new SimpleMeterRegistry()));
+            .withBean(MeterRegistry.class, SimpleMeterRegistry::new)
+            .withBean(BusinessMetrics.class);
 
     @Test
     void disabledWithoutRabbitUrl() {
@@ -40,6 +42,13 @@ class MessagingConfigTest {
                     TopicExchange exchange = ctx.getBean(TopicExchange.class);
                     assertThat(exchange.getName()).isEqualTo("erp.events");
                     assertThat(exchange.isDurable()).isTrue();
+                    MeterRegistry registry = ctx.getBean(MeterRegistry.class);
+                    for (String key : new String[]{"credit.decided", "transaction.created"}) {
+                        for (String result : new String[]{"ok", "error"}) {
+                            assertThat(registry.get(BusinessMetrics.EVENTS_PUBLISHED)
+                                    .tags("routing_key", key, "result", result).counter().count()).isZero();
+                        }
+                    }
                 });
     }
 

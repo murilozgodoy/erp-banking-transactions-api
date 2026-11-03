@@ -47,6 +47,13 @@ class CustomerCreatedListenerTest {
     }
 
     @Test
+    void seriesStartAtZero() {
+        assertThat(consumed("ok")).isZero();
+        assertThat(consumed("duplicate")).isZero();
+        assertThat(consumed("invalid")).isZero();
+    }
+
+    @Test
     void redeliveryIsIgnored() {
         when(accountService.openForNewCustomer(42L)).thenReturn(Optional.empty());
 
