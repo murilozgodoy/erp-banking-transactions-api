@@ -3,6 +3,7 @@ package com.erpbanking.transactions.portal.seed;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyList;
+import static org.mockito.Mockito.inOrder;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.verifyNoInteractions;
@@ -21,6 +22,7 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.ArgumentCaptor;
+import org.mockito.InOrder;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.mockito.junit.jupiter.MockitoSettings;
@@ -38,12 +40,14 @@ import com.erpbanking.transactions.repository.ReceivableRepository;
 import com.erpbanking.transactions.repository.SaleRepository;
 import com.erpbanking.transactions.repository.TransactionRepository;
 import com.erpbanking.transactions.service.AccountService;
+import com.erpbanking.transactions.service.lock.CustomerAccountLock;
 
 @ExtendWith(MockitoExtension.class)
 @MockitoSettings(strictness = Strictness.LENIENT)
 class PortalSeederTest {
 
     @Mock AccountService accountService;
+    @Mock CustomerAccountLock customerLock;
     @Mock AccountRepository accounts;
     @Mock SaleRepository sales;
     @Mock ReceivableRepository receivables;
@@ -59,7 +63,7 @@ class PortalSeederTest {
 
     @BeforeEach
     void setUp() {
-        seeder = new PortalSeeder(accountService, accounts, sales, receivables, payables, inventory, transactions,
+        seeder = new PortalSeeder(accountService, customerLock, accounts, sales, receivables, payables, inventory, transactions,
                 clock);
         when(sales.saveAll(anyList())).thenAnswer(inv -> {
             List<Sale> list = inv.getArgument(0);
@@ -109,6 +113,18 @@ class PortalSeederTest {
         assertThat(existing.getSaldo()).isGreaterThan(new BigDecimal("100.00"));
         verify(accounts).save(existing);
         verifyNoInteractions(accountService);
+    }
+
+    @Test
+    void locksTheCustomerBeforeLookingUpAndLockingTheAccount() {
+        existingAccount();
+
+        seeder.seed(profile);
+
+        InOrder order = inOrder(customerLock, accounts);
+        order.verify(customerLock).lock(42L);
+        order.verify(accounts).findIdsByCustomerId(42L);
+        order.verify(accounts).findByIdForUpdate(3L);
     }
 
     @Test
@@ -168,7 +184,7 @@ class PortalSeederTest {
         assertThat(new PortalDataGenerator().generate(profile, LocalDate.now(clock), clock.getZone()).saldo())
                 .isEqualByComparingTo(new PortalDataGenerator().generate(profile, LocalDate.of(2026, 11, 3),
                         PortalSeeder.ZONE).saldo());
-        assertThat(new PortalSeeder(accountService, accounts, sales, receivables, payables, inventory, transactions))
+        assertThat(new PortalSeeder(accountService, customerLock, accounts, sales, receivables, payables, inventory, transactions))
                 .isNotNull();
     }
 }

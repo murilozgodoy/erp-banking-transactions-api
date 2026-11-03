@@ -3,6 +3,7 @@ package com.erpbanking.transactions.service;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.Mockito.inOrder;
 import static org.mockito.Mockito.when;
 
 import java.math.BigDecimal;
@@ -11,6 +12,7 @@ import java.util.Optional;
 
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
+import org.mockito.InOrder;
 import org.mockito.InjectMocks;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
@@ -20,12 +22,27 @@ import com.erpbanking.transactions.domain.Account;
 import com.erpbanking.transactions.dto.AccountCreateRequest;
 import com.erpbanking.transactions.exception.ApiExceptions.AccountNotFoundException;
 import com.erpbanking.transactions.repository.AccountRepository;
+import com.erpbanking.transactions.service.lock.CustomerAccountLock;
 
 @ExtendWith(MockitoExtension.class)
 class AccountServiceTest {
 
     @Mock AccountRepository repo;
+    @Mock CustomerAccountLock customerLock;
     @InjectMocks AccountService service;
+
+    @Test
+    void openForNewCustomerLocksTheCustomerBeforeTheExistenceCheck() {
+        when(repo.findByCustomerIdOrderByIdDesc(42L)).thenReturn(List.of());
+        when(repo.save(any(Account.class))).thenAnswer(inv -> inv.getArgument(0));
+
+        service.openForNewCustomer(42L);
+
+        InOrder order = inOrder(customerLock, repo);
+        order.verify(customerLock).lock(42L);
+        order.verify(repo).findByCustomerIdOrderByIdDesc(42L);
+        order.verify(repo).save(any(Account.class));
+    }
 
     @Test
     void openForNewCustomerCreatesZeroBalanceAccount() {

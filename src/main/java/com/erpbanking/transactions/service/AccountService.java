@@ -12,14 +12,17 @@ import com.erpbanking.transactions.domain.Account;
 import com.erpbanking.transactions.dto.AccountCreateRequest;
 import com.erpbanking.transactions.exception.ApiExceptions.AccountNotFoundException;
 import com.erpbanking.transactions.repository.AccountRepository;
+import com.erpbanking.transactions.service.lock.CustomerAccountLock;
 
 @Service
 public class AccountService {
 
     private final AccountRepository accountRepository;
+    private final CustomerAccountLock customerLock;
 
-    public AccountService(AccountRepository accountRepository) {
+    public AccountService(AccountRepository accountRepository, CustomerAccountLock customerLock) {
         this.accountRepository = accountRepository;
+        this.customerLock = customerLock;
     }
 
     public Account create(AccountCreateRequest req) {
@@ -34,10 +37,12 @@ public class AccountService {
 
     /**
      * Abertura automática (evento {@code customer.created}): idempotente. Se o cliente já tem conta,
-     * não faz nada e retorna vazio.
+     * não faz nada e retorna vazio. Antes da verificação trava o cliente ({@link CustomerAccountLock}, na mesma
+     * transação), para duas entregas paralelas não abrirem duas contas.
      */
     @Transactional
     public Optional<Account> openForNewCustomer(Long customerId) {
+        customerLock.lock(customerId);
         if (!accountRepository.findByCustomerIdOrderByIdDesc(customerId).isEmpty()) {
             return Optional.empty();
         }

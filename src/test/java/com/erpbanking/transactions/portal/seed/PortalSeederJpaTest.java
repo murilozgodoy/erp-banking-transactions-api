@@ -30,6 +30,7 @@ import com.erpbanking.transactions.repository.ReceivableRepository;
 import com.erpbanking.transactions.repository.SaleRepository;
 import com.erpbanking.transactions.repository.TransactionRepository;
 import com.erpbanking.transactions.service.AccountService;
+import com.erpbanking.transactions.service.lock.CustomerLockConfig;
 
 /**
  * Grava a massa de verdade no H2 (mapeamento JPA, ids das vendas nos recebíveis e idempotência).
@@ -47,7 +48,7 @@ import com.erpbanking.transactions.service.AccountService;
         "spring.datasource.username=sa",
         "spring.datasource.password="
 })
-@Import({PortalSeeder.class, AccountService.class})
+@Import({PortalSeeder.class, AccountService.class, CustomerLockConfig.class})
 class PortalSeederJpaTest {
 
     @Autowired PortalSeeder seeder;
