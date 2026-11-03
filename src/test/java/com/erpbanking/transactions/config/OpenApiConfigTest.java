@@ -34,10 +34,27 @@ class OpenApiConfigTest {
         mvc.perform(get("/swagger-ui/index.html")).andExpect(status().isOk());
     }
 
+    /**
+     * Atrás da Vercel (/api/transactions → gateway /transactions → app /) nenhum header revela o prefixo /api,
+     * então o server e as URLs do Swagger UI são relativos e o navegador os resolve contra o caminho usado.
+     */
     @Test
-    void apiDocsHonorGatewayPrefix() throws Exception {
-        mvc.perform(get("/v3/api-docs").header("X-Forwarded-Prefix", "/transactions"))
+    void serverUrlIsRelativeToTheApiDocsLocation() throws Exception {
+        mvc.perform(get("/v3/api-docs").header("X-Forwarded-Prefix", "/transactions")
+                        .header("X-Forwarded-Host", "3.235.6.136").header("X-Forwarded-Proto", "http"))
                 .andExpect(status().isOk())
-                .andExpect(jsonPath("$.servers[0].url").value("http://localhost/transactions"));
+                .andExpect(jsonPath("$.servers.length()").value(1))
+                .andExpect(jsonPath("$.servers[0].url").value(".."));
+    }
+
+    @Test
+    void swaggerUiConfigUrlsAreRelative() throws Exception {
+        mvc.perform(get("/v3/api-docs/swagger-config").header("X-Forwarded-Prefix", "/transactions"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.configUrl").value("../v3/api-docs/swagger-config"))
+                .andExpect(jsonPath("$.url").value("../v3/api-docs"));
+        mvc.perform(get("/swagger-ui/swagger-initializer.js").header("X-Forwarded-Prefix", "/transactions"))
+                .andExpect(status().isOk())
+                .andExpect(content().string(containsString("\"configUrl\" : \"../v3/api-docs/swagger-config\"")));
     }
 }
