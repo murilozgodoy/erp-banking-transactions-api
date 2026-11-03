@@ -24,12 +24,14 @@ import com.erpbanking.transactions.repository.ReceivableRepository;
 import com.erpbanking.transactions.repository.SaleRepository;
 import com.erpbanking.transactions.repository.TransactionRepository;
 import com.erpbanking.transactions.service.AccountService;
+import com.erpbanking.transactions.service.lock.CustomerAccountLock;
 
 /**
  * Popula o portal do cliente PJ (evento {@code customer.onboarding_submitted}). Tudo numa transação:
  * abre a conta corrente se ainda não existir (PJ não recebe {@code customer.created}), grava vendas,
  * recebíveis, contas a pagar, estoque e o extrato dos últimos 30 dias, e ajusta o saldo da conta.
- * Idempotente: se o cliente já tem vendas, contas a pagar ou estoque, não faz nada. A conta corrente é
+ * Idempotente: se o cliente já tem vendas, contas a pagar ou estoque, não faz nada. Primeiro trava o cliente
+ * ({@link CustomerAccountLock}, até o fim da transação), então duas entregas não abrem duas contas. A conta corrente é
  * travada ({@code SELECT ... FOR UPDATE}) antes dessa verificação, então entregas paralelas do mesmo evento
  * são serializadas e só a primeira popula.
  */
@@ -43,6 +45,7 @@ public class PortalSeeder {
     private static final Logger log = LoggerFactory.getLogger(PortalSeeder.class);
 
     private final AccountService accountService;
+    private final CustomerAccountLock customerLock;
     private final AccountRepository accounts;
     private final SaleRepository sales;
     private final ReceivableRepository receivables;
@@ -53,16 +56,18 @@ public class PortalSeeder {
     private final Clock clock;
 
     @Autowired
-    public PortalSeeder(AccountService accountService, AccountRepository accounts, SaleRepository sales,
-                        ReceivableRepository receivables, PayableRepository payables,
+    public PortalSeeder(AccountService accountService, CustomerAccountLock customerLock, AccountRepository accounts,
+                        SaleRepository sales, ReceivableRepository receivables, PayableRepository payables,
                         InventoryItemRepository inventory, TransactionRepository transactions) {
-        this(accountService, accounts, sales, receivables, payables, inventory, transactions, Clock.system(ZONE));
+        this(accountService, customerLock, accounts, sales, receivables, payables, inventory, transactions,
+                Clock.system(ZONE));
     }
 
-    PortalSeeder(AccountService accountService, AccountRepository accounts, SaleRepository sales,
-                 ReceivableRepository receivables, PayableRepository payables, InventoryItemRepository inventory,
-                 TransactionRepository transactions, Clock clock) {
+    PortalSeeder(AccountService accountService, CustomerAccountLock customerLock, AccountRepository accounts,
+                 SaleRepository sales, ReceivableRepository receivables, PayableRepository payables,
+                 InventoryItemRepository inventory, TransactionRepository transactions, Clock clock) {
         this.accountService = accountService;
+        this.customerLock = customerLock;
         this.accounts = accounts;
         this.sales = sales;
         this.receivables = receivables;
@@ -75,6 +80,7 @@ public class PortalSeeder {
     @Transactional
     public Outcome seed(SeedProfile profile) {
         long customerId = profile.customerId();
+        customerLock.lock(customerId);
         Account account = lockedAccount(customerId);
         if (sales.existsByCustomerId(customerId) || payables.existsByCustomerId(customerId)
                 || inventory.existsByCustomerId(customerId)) {
