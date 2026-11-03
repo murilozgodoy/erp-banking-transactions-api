@@ -127,7 +127,7 @@ public class PendenciasService {
                         "Restam " + i.getQuantidade() + " unidades (mínimo " + i.getMinimo() + "). Repor "
                                 + faltamUn + " unidades custa cerca de " + brl(valor)
                                 + "; dá para financiar a compra com o ErpIa.",
-                        valor, hoje, new Acao("Ver estoque", ROTA_ESTOQUE,
+                        valor, hoje, new Acao("Ver estoque", ROTA_ESTOQUE + "?sku=" + i.getSku(),
                                 new CreditoSugerido(FINANCIAMENTO_ESTOQUE, valor))));
             }
             if (i.getGiroDias() > PortalReadService.GIRO_PARADO_DIAS) {
@@ -137,7 +137,7 @@ public class PendenciasService {
                         brl(valor) + " em mercadoria com giro de " + i.getGiroDias()
                                 + " dias. Uma promoção libera caixa; se precisar de fôlego, use o estoque como garantia.",
                         valor, i.getUltimaVenda() != null ? i.getUltimaVenda() : hoje,
-                        new Acao("Ver estoque", ROTA_ESTOQUE, new CreditoSugerido(FINANCIAMENTO_ESTOQUE, valor))));
+                        new Acao("Ver estoque", ROTA_ESTOQUE + "?sku=" + i.getSku(), new CreditoSugerido(FINANCIAMENTO_ESTOQUE, valor))));
             }
         }
 
@@ -155,14 +155,14 @@ public class PendenciasService {
                 + brl(total) + ". Pague agora para não acumular mais juros.";
         return new Pendencia("payable-" + p.getId(), CONTA_ATRASADA, "Conta atrasada: " + p.getFornecedor(),
                 descricao, money(p.getValor()), p.getVencimento(),
-                new Acao("Pagar agora", ROTA_PAGAMENTOS, creditoSeFaltar(total, saldo)));
+                new Acao("Pagar agora", ROTA_PAGAMENTOS + "?conta=" + p.getId(), creditoSeFaltar(total, saldo)));
     }
 
     private static Pendencia venceHoje(Payable p, BigDecimal saldo) {
         BigDecimal valor = money(p.getValor());
         return new Pendencia("payable-" + p.getId(), VENCE_HOJE, "Vence hoje: " + p.getFornecedor(),
                 "Conta de " + brl(valor) + " vence hoje. Pague até o fim do dia para evitar multa de 2% e juros.",
-                valor, p.getVencimento(), new Acao("Pagar", ROTA_PAGAMENTOS, creditoSeFaltar(valor, saldo)));
+                valor, p.getVencimento(), new Acao("Pagar", ROTA_PAGAMENTOS + "?conta=" + p.getId(), creditoSeFaltar(valor, saldo)));
     }
 
     /** Sugere capital de giro só quando o saldo não cobre o valor (sugestão = o que falta). */

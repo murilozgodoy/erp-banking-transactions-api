@@ -211,7 +211,8 @@ class PortalReadServiceTest {
         Pendencia antiga = p.get(0);
         assertThat(antiga.titulo()).isEqualTo("Conta atrasada: Distribuidora Beta");
         assertThat(antiga.descricao()).contains("24/10/2026", "há 10 dias", "R$ 23,33", "R$ 1.023,33");
-        assertThat(antiga.acao().rota()).isEqualTo("/app/pagamentos");
+        assertThat(antiga.acao().rota()).isEqualTo("/app/pagamentos?conta=" + ids.atrasadaAntiga());
+        assertThat(p.get(4).acao().rota()).startsWith("/app/estoque?sku=");
         assertThat(antiga.acao().credito().produto()).isEqualTo("CAPITAL_DE_GIRO");
         assertThat(antiga.acao().credito().valor()).isEqualByComparingTo("23.33");
         assertThat(p.get(1).acao().credito()).isNull();
