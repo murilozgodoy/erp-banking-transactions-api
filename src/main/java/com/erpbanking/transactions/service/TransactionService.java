@@ -38,7 +38,7 @@ public class TransactionService {
 
     @Transactional
     public TransactionResult register(TransactionRequest req) {
-        Account account = accountRepository.findById(req.accountId())
+        Account account = accountRepository.findByIdForUpdate(req.accountId())
                 .orElseThrow(() -> new AccountNotFoundException("Conta " + req.accountId() + " não encontrada"));
 
         if (account.getStatus() != AccountStatus.ACTIVE) {
