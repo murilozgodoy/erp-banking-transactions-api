@@ -36,6 +36,12 @@ public class GlobalExceptionHandler {
         return ResponseEntity.status(HttpStatus.BAD_GATEWAY).body(Map.of("error", e.getMessage()));
     }
 
+    @ExceptionHandler(ScoreServiceUnavailableException.class)
+    public ResponseEntity<Map<String, String>> scoreServiceUnavailable(ScoreServiceUnavailableException e) {
+        return ResponseEntity.status(HttpStatus.SERVICE_UNAVAILABLE)
+                .body(Map.of("error", ScoreServiceUnavailableException.MESSAGE));
+    }
+
     @ExceptionHandler(ApiExceptions.ScoreForbiddenException.class)
     public ResponseEntity<Map<String, String>> scoreForbidden(ApiExceptions.ScoreForbiddenException e) {
         return ResponseEntity.status(HttpStatus.FORBIDDEN).body(Map.of("error", e.getMessage()));
