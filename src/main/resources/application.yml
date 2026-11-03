@@ -19,8 +19,11 @@ spring:
     password: ${DATABASE_PASSWORD:}
     driver-class-name: ${DATABASE_DRIVER:org.h2.Driver}
   jpa:
+    # Em produção (compose): DATABASE_URL=jdbc:postgresql://postgres:5432/erp?currentSchema=transactions
+    # e DATABASE_DRIVER=org.postgresql.Driver; as tabelas são criadas/atualizadas no startup.
     hibernate:
-      ddl-auto: update
+      ddl-auto: ${DDL_AUTO:update}
+    open-in-view: false
     show-sql: false
   h2:
     console:
