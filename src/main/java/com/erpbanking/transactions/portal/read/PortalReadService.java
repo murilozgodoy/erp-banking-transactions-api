@@ -68,6 +68,8 @@ public class PortalReadService {
     static final int FLUXO_DIAS = 60;
     static final int GIRO_PARADO_DIAS = 90;
     static final int JANELA_PADRAO_DIAS = 30;
+    /** Maior período aceito em {@code GET /me/sales} (from..to, inclusive). */
+    static final int JANELA_MAX_VENDAS_DIAS = 400;
 
     private final AccountRepository accounts;
     private final TransactionRepository transactions;
@@ -169,6 +171,9 @@ public class PortalReadService {
         LocalDate ate = to != null ? to : hoje();
         LocalDate de = from != null ? from : ate.minusDays(JANELA_PADRAO_DIAS - 1L);
         validarPeriodo(de, ate);
+        if (de.plusDays(JANELA_MAX_VENDAS_DIAS).isBefore(ate.plusDays(1))) {
+            throw new IllegalArgumentException("Período máximo de " + JANELA_MAX_VENDAS_DIAS + " dias");
+        }
         List<Sale> lista = sales.findByCustomerIdAndDataBetweenOrderByDataAsc(customerId, de, ate);
         BigDecimal total = soma(lista, Sale::getValor);
 
