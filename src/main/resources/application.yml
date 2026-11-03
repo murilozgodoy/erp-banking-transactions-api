@@ -49,6 +49,8 @@ messaging:
   exchange: erp.events
   # Consome customer.created (fila transactions.customer-created) e abre conta corrente com saldo zero.
   auto-open-account: ${AUTO_OPEN_ACCOUNT:false}
+  # Sempre que a mensageria está ligada, consome customer.onboarding_submitted (fila transactions.onboarding-submitted)
+  # e popula o portal do cliente PJ (portal/seed/PortalSeeder).
 
 # Portal do cliente: o customer do token vem do Onboarding GET /me (token relay).
 app:
