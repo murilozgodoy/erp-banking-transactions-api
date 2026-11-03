@@ -38,7 +38,9 @@ public class CustomerCreatedListener {
     public void onCustomerCreated(Map<String, Object> event) {
         Long customerId = customerId(event);
         if (customerId == null) {
-            log.warn("customer.created sem customer_id valido, descartado: {}", event);
+            // Sem o payload: ele traz dados pessoais (documento, e-mail).
+            log.warn("customer.created sem customer_id valido, descartado: event_id={}",
+                    event == null ? null : event.get("event_id"));
             metrics.eventConsumed(ROUTING_KEY, "invalid");
             throw new AmqpRejectAndDontRequeueException("customer_id ausente ou invalido");
         }

@@ -16,6 +16,7 @@ import org.springframework.web.client.RestClientException;
 import org.springframework.web.client.RestTemplate;
 
 import com.erpbanking.transactions.config.CreditScoreProperties;
+import com.erpbanking.transactions.config.LogSafe;
 import com.erpbanking.transactions.dto.ScoreResponse;
 import com.erpbanking.transactions.exception.ApiExceptions.ScoreForbiddenException;
 import com.erpbanking.transactions.exception.ApiExceptions.ScoreUnavailableException;
@@ -95,12 +96,12 @@ public class CreditScoreClient {
             } catch (RestClientException e) {
                 // Resposta recebida, mas inválida (ex.: corpo não desserializável): não é transitória.
                 circuitBreaker.onSuccess();
-                throw new ScoreUnavailableException("Falha ao contactar Score API: " + e.getMessage());
+                throw new ScoreUnavailableException("Falha ao contactar Score API: " + LogSafe.describe(e));
             }
 
             if (attempt >= maxAttempts) {
                 circuitBreaker.onFailure();
-                log.warn("Credit Score indisponível após {} tentativa(s): {}", attempt, lastError.getMessage());
+                log.warn("Credit Score indisponível após {} tentativa(s): {}", attempt, LogSafe.describe(lastError));
                 throw new ScoreServiceUnavailableException(lastError);
             }
             long backoff = retryBackoffMs << (attempt - 1);

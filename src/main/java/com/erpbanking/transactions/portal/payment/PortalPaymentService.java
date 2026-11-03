@@ -57,6 +57,8 @@ public class PortalPaymentService {
     static final ZoneId ZONE = ZoneId.of("America/Sao_Paulo");
     /** {@code motivo} do 403 SEM_PERMISSAO quando o autor tenta aprovar ou rejeitar o próprio pagamento. */
     public static final String MOTIVO_AUTOR = "AUTOR";
+    /** Agendamento máximo: {@code agendado_para} até 1 ano à frente. */
+    static final int MAX_AGENDAMENTO_DIAS = 365;
 
     private static final Logger log = LoggerFactory.getLogger(PortalPaymentService.class);
 
@@ -95,6 +97,9 @@ public class PortalPaymentService {
         LocalDate today = LocalDate.now(clock);
         if (req.agendadoPara() != null && req.agendadoPara().isBefore(today)) {
             throw new ValidationException("agendado_para não pode ser anterior a hoje (" + today + ")");
+        }
+        if (req.agendadoPara() != null && req.agendadoPara().isAfter(today.plusDays(MAX_AGENDAMENTO_DIAS))) {
+            throw new ValidationException("agendado_para não pode passar de " + MAX_AGENDAMENTO_DIAS + " dias");
         }
         Payable payable = req.payableId() == null ? null : loadPayable(customerId, req.payableId(), req.valor());
         Account account = lockedAccountOf(customerId);

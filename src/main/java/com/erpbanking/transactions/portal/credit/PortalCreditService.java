@@ -312,6 +312,10 @@ public class PortalCreditService {
 
         List<Long> selecionados = produto == CreditProduct.ANTECIPACAO_RECEBIVEIS && receivableIds != null
                 && !receivableIds.isEmpty() ? List.copyOf(new LinkedHashSet<>(receivableIds)) : null;
+        if (selecionados != null) {
+            // Valida sempre (inclusive com crédito negado): id de outra empresa ou inexistente → 404.
+            selected(customerId, selecionados);
+        }
         BigDecimal limite = CreditPricing.negada(faixa) ? BigDecimal.ZERO.setScale(2) : limitFor(customerId,
                 produto, selecionados, today);
         BigDecimal valorMoney = CreditPricing.money(valor);
