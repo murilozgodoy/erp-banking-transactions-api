@@ -23,6 +23,7 @@ import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.boot.test.mock.mockito.MockBean;
 import org.springframework.test.context.ActiveProfiles;
 
+import com.erpbanking.transactions.portal.CurrentCustomer;
 import com.erpbanking.transactions.domain.Account;
 import com.erpbanking.transactions.domain.Payable;
 import com.erpbanking.transactions.domain.PayableCategory;
@@ -92,7 +93,7 @@ class PortalPaymentConcurrencyTest {
         for (int i = 0; i < n; i++) {
             Callable<Object> task = () -> {
                 start.await();
-                return service.pay(customerId, req);
+                return service.pay(new CurrentCustomer("user", customerId, "APROVADO"), req);
             };
             futures.add(pool.submit(task));
         }
@@ -147,7 +148,7 @@ class PortalPaymentConcurrencyTest {
         Account acc = account("10.00");
         Payable payable = payable();
         LocalDate data = today.plusDays(5);
-        Long id = service.pay(customerId, req("150.00", payable.getId(), data)).id();
+        Long id = service.pay(new CurrentCustomer("user", customerId, "APROVADO"), req("150.00", payable.getId(), data)).id();
 
         assertThat(service.dueScheduledIds(today)).doesNotContain(id);
         assertThat(service.executeScheduled(id, today)).isFalse();

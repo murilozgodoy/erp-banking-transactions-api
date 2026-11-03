@@ -23,6 +23,7 @@ import com.erpbanking.transactions.domain.Payment;
 import com.erpbanking.transactions.domain.PaymentStatus;
 import com.erpbanking.transactions.domain.TransactionType;
 import com.erpbanking.transactions.dto.TransactionRequest;
+import com.erpbanking.transactions.portal.CurrentCustomer;
 import com.erpbanking.transactions.portal.PortalExceptions.BusinessRuleException;
 import com.erpbanking.transactions.portal.PortalExceptions.NotFoundException;
 import com.erpbanking.transactions.portal.PortalExceptions.SaldoInsuficienteException;
@@ -85,7 +86,8 @@ public class PortalPaymentService {
 
     /** A conta aberta aqui permanece mesmo se o pagamento falhar por saldo insuficiente. */
     @Transactional(noRollbackFor = SaldoInsuficienteException.class)
-    public PaymentCreated pay(Long customerId, PaymentRequest req) {
+    public PaymentCreated pay(CurrentCustomer who, PaymentRequest req) {
+        Long customerId = who.customerId();
         LocalDate today = LocalDate.now(clock);
         if (req.agendadoPara() != null && req.agendadoPara().isBefore(today)) {
             throw new ValidationException("agendado_para não pode ser anterior a hoje (" + today + ")");
@@ -106,6 +108,8 @@ public class PortalPaymentService {
                 : payable != null ? payable.getCodigoBarras() : null);
         p.setAutenticacao(newAuthentication());
         p.setCriadoEm(now);
+        p.setCreatedBySub(who.sub());
+        p.setCreatedByNome(who.nome());
 
         BigDecimal saldoApos;
         if (agendado) {

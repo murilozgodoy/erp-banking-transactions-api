@@ -61,6 +61,13 @@ public class Payment {
     @Column(name = "criado_em", nullable = false)
     private Instant criadoEm = Instant.now();
 
+    /** Auditoria: {@code sub} e nome do membro que fez o pagamento (nulos nos pagamentos antigos). */
+    @Column(name = "created_by_sub")
+    private String createdBySub;
+
+    @Column(name = "created_by_nome")
+    private String createdByNome;
+
     public Payment() {}
 
     public Long getId() { return id; }
@@ -89,4 +96,8 @@ public class Payment {
     public void setTransactionId(Long transactionId) { this.transactionId = transactionId; }
     public Instant getCriadoEm() { return criadoEm; }
     public void setCriadoEm(Instant criadoEm) { this.criadoEm = criadoEm; }
+    public String getCreatedBySub() { return createdBySub; }
+    public void setCreatedBySub(String createdBySub) { this.createdBySub = createdBySub; }
+    public String getCreatedByNome() { return createdByNome; }
+    public void setCreatedByNome(String createdByNome) { this.createdByNome = createdByNome; }
 }

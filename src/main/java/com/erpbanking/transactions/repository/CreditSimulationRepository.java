@@ -1,6 +1,7 @@
 package com.erpbanking.transactions.repository;
 
 import java.math.BigDecimal;
+import java.util.List;
 import java.util.Optional;
 
 import org.springframework.data.jpa.repository.JpaRepository;
@@ -19,6 +20,11 @@ public interface CreditSimulationRepository extends JpaRepository<CreditSimulati
     @Lock(LockModeType.PESSIMISTIC_WRITE)
     @Query("select s from CreditSimulation s where s.id = :id")
     Optional<CreditSimulation> findByIdForUpdate(@Param("id") Long id);
+
+    /** Simulações (travadas) ligadas ao pedido; na prática uma só. */
+    @Lock(LockModeType.PESSIMISTIC_WRITE)
+    @Query("select s from CreditSimulation s where s.creditRequestId = :creditRequestId order by s.id desc")
+    List<CreditSimulation> findByCreditRequestIdForUpdate(@Param("creditRequestId") Long creditRequestId);
 
     /** Soma do valor das simulações do produto cujo pedido está no status informado; {@code null} se nenhuma. */
     @Query("select sum(s.valor) from CreditSimulation s, CreditRequest r "

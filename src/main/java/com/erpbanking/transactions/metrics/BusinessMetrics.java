@@ -27,7 +27,9 @@ public class BusinessMetrics {
         this.registry = registry;
         // Registra as séries com zero para os painéis existirem desde o startup.
         for (CreditStatus status : CreditStatus.values()) {
-            creditDecisions(status);
+            if (status.decisao()) {
+                creditDecisions(status);
+            }
         }
         for (TransactionType tipo : TransactionType.values()) {
             transactionsCreated(tipo);

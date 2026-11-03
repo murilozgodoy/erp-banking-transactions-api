@@ -174,4 +174,43 @@ class CreditServiceTest {
 
         assertThat(service.listar(null)).extracting(r -> r.status()).containsExactly(CreditStatus.REVISAO);
     }
+
+    @Test
+    void aguardandoContratacaoNaoDecideNemPublica() {
+        var resp = service.registrarAguardando(5L, new BigDecimal("1000"), 6, "auth0|f", "Fábio");
+
+        assertThat(resp.status()).isEqualTo(CreditStatus.AGUARDANDO_CONTRATACAO);
+        assertThat(resp.createdByNome()).isEqualTo("Fábio");
+        verify(crRepo).save(any(CreditRequest.class));
+        verify(contractRepo, never()).save(any());
+        verify(events, never()).publishEvent(any());
+        assertThat(CreditStatus.AGUARDANDO_CONTRATACAO.decisao()).isFalse();
+        assertThat(CreditStatus.APROVADO.decisao()).isTrue();
+    }
+
+    @Test
+    void confirmarSoAceitaPedidoAguardando() {
+        CreditRequest decidido = request(9L, 5L, CreditStatus.REVISAO);
+        var d = new CreditService.PricedDecision(5L, new BigDecimal("1000"), 6, 700.0, "MEDIO",
+                CreditStatus.APROVADO, "ok", new BigDecimal("0.0249"));
+
+        assertThatThrownBy(() -> service.confirmarPrecificado(decidido, d)).isInstanceOf(IllegalStateException.class);
+        verify(events, never()).publishEvent(any());
+    }
+
+    @Test
+    void confirmarDecideNoMesmoPedidoEMantemOAutor() {
+        CreditRequest aguardando = request(9L, 5L, CreditStatus.AGUARDANDO_CONTRATACAO);
+        aguardando.setCreatedByNome("Fábio");
+        var d = new CreditService.PricedDecision(5L, new BigDecimal("1000"), 6, 700.0, "MEDIO",
+                CreditStatus.NEGADO, "não", new BigDecimal("0.0249"), "auth0|dono", "Dona");
+
+        var resp = service.confirmarPrecificado(aguardando, d);
+
+        assertThat(resp.id()).isEqualTo(9L);
+        assertThat(resp.status()).isEqualTo(CreditStatus.NEGADO);
+        assertThat(resp.createdByNome()).isEqualTo("Fábio");
+        verify(contractRepo, never()).save(any());
+        verify(events).publishEvent(any(CreditDecidedEvent.class));
+    }
 }

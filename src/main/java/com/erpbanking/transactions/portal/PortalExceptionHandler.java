@@ -36,6 +36,11 @@ public class PortalExceptionHandler {
         return ResponseEntity.status(HttpStatus.UNPROCESSABLE_ENTITY).body(body);
     }
 
+    @ExceptionHandler(PermissionDeniedException.class)
+    public ResponseEntity<Map<String, Object>> permissionDenied(PermissionDeniedException e) {
+        return ResponseEntity.status(HttpStatus.FORBIDDEN).body(e.body());
+    }
+
     @ExceptionHandler(NotFoundException.class)
     public ResponseEntity<Map<String, Object>> notFound(NotFoundException e) {
         return ResponseEntity.status(HttpStatus.NOT_FOUND).body(body(e.getCode(), e.getMessage()));

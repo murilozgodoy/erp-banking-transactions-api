@@ -1,5 +1,6 @@
 package com.erpbanking.transactions.portal.credit;
 
+import static org.mockito.ArgumentMatchers.anyString;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.hamcrest.Matchers.hasSize;
 import static org.mockito.Mockito.when;
@@ -35,6 +36,7 @@ import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.ResultActions;
 import org.springframework.test.web.servlet.request.MockHttpServletRequestBuilder;
 
+import com.erpbanking.transactions.portal.CurrentCustomer;
 import com.erpbanking.transactions.config.SecurityConfig;
 import com.erpbanking.transactions.domain.CreditRequest;
 import com.erpbanking.transactions.domain.CreditSimulation;
@@ -79,7 +81,8 @@ class MeCreditControllerTest {
     @BeforeEach
     void setUp() {
         customerId = IDS.incrementAndGet();
-        when(resolver.requireCustomerId()).thenReturn(customerId);
+        when(resolver.requirePermission(anyString())).thenReturn(new CurrentCustomer("user", customerId, "APROVADO"));
+        when(resolver.require()).thenReturn(new CurrentCustomer("user", customerId, "APROVADO"));
         analysis("MEDIO", "APROVADO");
     }
 
@@ -394,7 +397,7 @@ class MeCreditControllerTest {
         for (int i = 0; i < 4; i++) {
             futures.add(pool.submit(() -> {
                 start.await();
-                return credit.request(customerId, new PortalCreditRequest(simId, null, null, null));
+                return credit.request(new CurrentCustomer("user", customerId, "APROVADO"), new PortalCreditRequest(simId, null, null, null));
             }));
         }
         start.countDown();

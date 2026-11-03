@@ -9,8 +9,10 @@ import org.springframework.web.bind.MethodArgumentNotValidException;
 import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
 
+import com.erpbanking.transactions.portal.MemberSuspendedException;
 import com.erpbanking.transactions.portal.OnboardingPendingException;
 import com.erpbanking.transactions.portal.OnboardingUnavailableException;
+import com.erpbanking.transactions.portal.PermissionDeniedException;
 
 @RestControllerAdvice
 public class GlobalExceptionHandler {
@@ -62,6 +64,18 @@ public class GlobalExceptionHandler {
     @ExceptionHandler(OnboardingUnavailableException.class)
     public ResponseEntity<Map<String, String>> onboardingUnavailable(OnboardingUnavailableException e) {
         return ResponseEntity.status(HttpStatus.SERVICE_UNAVAILABLE).body(Map.of("error", "ONBOARDING_INDISPONIVEL"));
+    }
+
+    /** Membro sem a permissão da rota: 403 {"error":"SEM_PERMISSAO","permissao":...}. */
+    @ExceptionHandler(PermissionDeniedException.class)
+    public ResponseEntity<Map<String, Object>> permissionDenied(PermissionDeniedException e) {
+        return ResponseEntity.status(HttpStatus.FORBIDDEN).body(e.body());
+    }
+
+    /** Membro suspenso pelo DONO (403 do Onboarding): 403 {"error":"MEMBRO_SUSPENSO"}. */
+    @ExceptionHandler(MemberSuspendedException.class)
+    public ResponseEntity<Map<String, String>> memberSuspended(MemberSuspendedException e) {
+        return ResponseEntity.status(HttpStatus.FORBIDDEN).body(Map.of("error", MemberSuspendedException.CODE));
     }
 
     @ExceptionHandler(MethodArgumentNotValidException.class)

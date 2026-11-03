@@ -88,6 +88,45 @@ public class CreditService {
         cr.setCustomerId(d.customerId());
         cr.setValorSolicitado(d.valor());
         cr.setPrazoMeses(d.prazoMeses());
+        cr.setCreatedBySub(d.createdBySub());
+        cr.setCreatedByNome(d.createdByNome());
+        return decidir(cr, d);
+    }
+
+    /**
+     * Pedido do portal feito por quem só tem {@code pedir_credito}: fica AGUARDANDO_CONTRATACAO, sem decisão,
+     * sem contrato e sem {@code credit.decided} (nem {@code credit_decisions_total}) até ser confirmado.
+     */
+    @Transactional
+    public CreditResponseDto registrarAguardando(Long customerId, BigDecimal valor, int prazoMeses,
+                                                 String createdBySub, String createdByNome) {
+        CreditRequest cr = new CreditRequest();
+        cr.setCustomerId(customerId);
+        cr.setValorSolicitado(valor);
+        cr.setPrazoMeses(prazoMeses);
+        cr.setStatus(CreditStatus.AGUARDANDO_CONTRATACAO);
+        cr.setMotivo("Aguardando contratação por quem tem a permissão contratar_credito");
+        cr.setCreatedBySub(createdBySub);
+        cr.setCreatedByNome(createdByNome);
+        creditRequestRepository.save(cr);
+        return CreditResponseDto.of(cr, BigDecimal.ZERO, BigDecimal.ZERO);
+    }
+
+    /**
+     * Confirma um pedido AGUARDANDO_CONTRATACAO (já travado pelo chamador): aplica a decisão no mesmo pedido,
+     * gera o contrato se APROVADO e publica {@code credit.decided}. A autoria original é mantida.
+     */
+    @Transactional
+    public CreditResponseDto confirmarPrecificado(CreditRequest aguardando, PricedDecision d) {
+        if (aguardando.getStatus() != CreditStatus.AGUARDANDO_CONTRATACAO) {
+            throw new IllegalStateException("Pedido " + aguardando.getId() + " não está AGUARDANDO_CONTRATACAO");
+        }
+        aguardando.setValorSolicitado(d.valor());
+        aguardando.setPrazoMeses(d.prazoMeses());
+        return decidir(aguardando, d);
+    }
+
+    private CreditResponseDto decidir(CreditRequest cr, PricedDecision d) {
         cr.setScoreSnapshot(d.score());
         cr.setStatus(d.status());
         cr.setMotivo(d.motivo());
@@ -104,9 +143,19 @@ public class CreditService {
         return CreditResponseDto.of(cr, valorAprovado, taxa);
     }
 
-    /** Decisão já tomada pelo portal; {@code taxaJuros} é a fração mensal (ex.: 0.0249). */
+    /**
+     * Decisão já tomada pelo portal; {@code taxaJuros} é a fração mensal (ex.: 0.0249). {@code createdBy*} é a
+     * auditoria de quem pediu (opcional).
+     */
     public record PricedDecision(Long customerId, BigDecimal valor, int prazoMeses, Double score,
-                                 String faixaRisco, CreditStatus status, String motivo, BigDecimal taxaJuros) {}
+                                 String faixaRisco, CreditStatus status, String motivo, BigDecimal taxaJuros,
+                                 String createdBySub, String createdByNome) {
+
+        public PricedDecision(Long customerId, BigDecimal valor, int prazoMeses, Double score, String faixaRisco,
+                              CreditStatus status, String motivo, BigDecimal taxaJuros) {
+            this(customerId, valor, prazoMeses, score, faixaRisco, status, motivo, taxaJuros, null, null);
+        }
+    }
 
     public CreditResponseDto consultar(Long id) {
         CreditRequest cr = creditRequestRepository.findById(id)

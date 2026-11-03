@@ -11,6 +11,7 @@ import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
 
 import com.erpbanking.transactions.portal.CurrentCustomerResolver;
+import com.erpbanking.transactions.portal.Permissoes;
 import com.erpbanking.transactions.portal.payment.PaymentDtos.PaymentCreated;
 import com.erpbanking.transactions.portal.payment.PaymentDtos.PaymentRequest;
 import com.erpbanking.transactions.portal.payment.PaymentDtos.PaymentView;
@@ -33,12 +34,12 @@ public class MePaymentsController {
 
     @PostMapping
     public ResponseEntity<PaymentCreated> pay(@Valid @RequestBody PaymentRequest req) {
-        Long customerId = currentCustomer.requireCustomerId();
-        return ResponseEntity.status(HttpStatus.CREATED).body(payments.pay(customerId, req));
+        return ResponseEntity.status(HttpStatus.CREATED)
+                .body(payments.pay(currentCustomer.requirePermission(Permissoes.PAGAR), req));
     }
 
     @GetMapping
     public List<PaymentView> history() {
-        return payments.history(currentCustomer.requireCustomerId());
+        return payments.history(currentCustomer.requirePermission(Permissoes.VER_FINANCEIRO).customerId());
     }
 }
