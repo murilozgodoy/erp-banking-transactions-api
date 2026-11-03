@@ -279,3 +279,25 @@ resposta é 403 com o motivo.
 
 Nos testes, `spring-security-test` (`jwt()` com authorities) e um JWKS local; o perfil `test`
 fornece configuração fictícia e não deve ser usado em produção.
+
+## Isolamento entre empresas
+
+Toda rota `/me/*` usa só o `customer_id` resolvido do token (Onboarding `GET /me`); nenhum id do corpo ou da URL
+escolhe a empresa.
+
+- **Recurso de outra empresa = 404**, com o mesmo corpo de um id inexistente (nunca 403, para não revelar que existe):
+  `approve`/`reject` de pagamento, `payable_id` em `POST /me/payments`, `simulation_id` em `POST /me/credit/requests`,
+  `POST /me/credit/requests/{id}/confirm` e `receivable_ids` em `POST /me/credit/simulations` (sempre validados,
+  mesmo com crédito negado; duplicados são ignorados; no máximo 200). O 404 sai antes de qualquer escrita e a
+  transação é desfeita, então nada muda.
+- **Listas** (`GET /me/*`) filtram por `customer_id` no repositório.
+- **Rotas de staff** (`/accounts`, `/credits`, `/transactions`) exigem `read:/write:accounts` e `read:/write:credits`;
+  um token de cliente (`read:self`/`write:self`) recebe 403. Já um token de staff sem `read:self` recebe 403 em `/me`.
+- **Membro SUSPENSO**: 403 `MEMBRO_SUSPENSO` em todas as rotas `/me`, sem cache.
+- **Entrada**: `valor` positivo com até 17 dígitos inteiros e 2 decimais (`NaN`, `Infinity`, `1e400` → 400);
+  `agendado_para` entre hoje e hoje + 365 dias; `limite_pagamento` negativo ou zero manda tudo para aprovação e um
+  valor não numérico faz o `GET /me` falhar (503), nunca vira "sem limite".
+- **Logs**: sem token, sem payload de evento e sem corpo de resposta de outro serviço (`LogSafe`);
+  `spring.mvc.log-request-details=false` e `org.springframework.web`/`security` em INFO.
+
+Testes em `src/test/java/.../security/` (duas empresas no H2, Onboarding mockado por `sub`).
