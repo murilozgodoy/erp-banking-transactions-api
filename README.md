@@ -28,6 +28,9 @@ docker run --rm -p 8080:8080 --env-file .env transactions-api
 
 Imagem `eclipse-temurin:21-jre-alpine`, usuário não-root (`app`, uid 10001), `HEALTHCHECK` em `/actuator/health` e
 `JAVA_TOOL_OPTIONS="-XX:MaxRAMPercentage=75 -XX:+UseSerialGC -XX:+ExitOnOutOfMemoryError"` (pode ser sobrescrito).
+No compose do infra (container com `mem_limit` de 512 MB na EC2) ele é sobrescrito por
+`-XX:MaxRAMPercentage=60 -XX:MaxMetaspaceSize=160m -XX:ReservedCodeCacheSize=64m -Xss512k -XX:+UseSerialGC`, para
+heap + metaspace + code cache caberem no limite sem OOM kill.
 O CI publica `ghcr.io/murilozgodoy/erp-banking-transactions-api:latest` e `:<sha>` a cada push na `main` (job `publish`).
 O stack completo (gateway, Postgres, RabbitMQ, Prometheus, Grafana) fica no repo
 [`GabrielRosa1/erp-banking-infra`](https://github.com/GabrielRosa1/erp-banking-infra).
