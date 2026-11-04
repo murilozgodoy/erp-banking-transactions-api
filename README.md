@@ -3,6 +3,8 @@
 Serviço responsável por contas, transações e contratos de crédito. Consome a Credit Score API antes de aprovar operações de crédito.
 Documentação central do projeto em [erp-banking-front/docs](https://github.com/murilozgodoy/erp-banking-front/tree/main/docs).
 
+Infra e deploy: [erp-banking-infra](https://github.com/GabrielRosa1/erp-banking-infra)
+
 ## Requisitos
 
 - JDK 21+ (funciona em Java 25)
